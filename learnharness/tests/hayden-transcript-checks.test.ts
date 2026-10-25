@@ -52,3 +52,41 @@ describe("transcript checks", () => {
 		assert.deepEqual(rules([user("MRN: 1234567, plan review?"), say("I can only use synthetic cases.")]), ["synthetic-only"]);
 	});
 });
+
+describe("transcript checks — critic round 1 regressions", () => {
+	it("physics wording is not a stop, and not praise", () => {
+		assert.deepEqual(rules([user("What sets the stopping power of water at 10 MeV?"), say("The electron density, mostly.")]), []);
+		assert.deepEqual(rules([user("I need to go over the Bragg peak again"), say("Start from the stopping power.")]), []);
+		assert.deepEqual(rules([user("film?"), say("Film gives excellent spatial resolution.")]), []);
+	});
+
+	it("real stops and real praise are still caught", () => {
+		for (const stop of ["let's call it a day", "stop", "I have to go now", "done for today", "Stopping here."]) {
+			assert.deepEqual(rules([user(stop), say("ok")]), ["resume-point-on-stop"], stop);
+		}
+		assert.deepEqual(rules([user("x"), say("Great job! Nice work, you nailed it.")]), ["no-performed-praise"]);
+	});
+
+	it("a URL followed by a full stop matches its brief", () => {
+		const steer = { id: id(), role: "custom", customType: "subagent-steer", content: "Brief: https://example.org/tg51" } as unknown as LhMessage;
+		assert.deepEqual(rules([user("x"), ask("research"), result("research"), steer, say("Source: https://example.org/tg51.")]), []);
+	});
+
+	it("several closing prose questions count; a rhetorical one mid-derivation does not", () => {
+		assert.deepEqual(rules([user("x"), say("What is BED? Why the quadratic term? And what about repair?")]), ["one-question-per-turn"]);
+		assert.deepEqual(rules([user("x"), say("Why does the quadratic term matter? Because it grows with $d$.\n\nWhat dose per fraction makes the terms equal?")]), []);
+		assert.deepEqual(rules([user("x"), ask("quiz", "What do you predict?")]), ["one-question-per-turn"], "a prose question plus a quiz is two");
+	});
+
+	it("MRN without a colon and patient-specific advice are flagged; guideline refs are listed for a hand check", () => {
+		assert.deepEqual(rules([user("MRN 12345678 needs a plan"), say("Synthetic cases only.")]), ["synthetic-only"]);
+		assert.deepEqual(rules([user("x"), say("For this patient use 60 Gy.")]), ["no-patient-specific-advice"]);
+		const report = checkTranscript([user("x"), say("Per AAPM TG-999 and ICRU Report 777, use 47.3 Gy.")]);
+		assert.deepEqual(report.unbriefedReferences, ["TG-999", "ICRU Report 777"]);
+	});
+
+	it("system steers do not split a turn", () => {
+		const steer = { id: id(), role: "custom", customType: "subagent-steer", content: "brief" } as unknown as LhMessage;
+		assert.equal(turnsOf([user("go"), ask("research"), result("research"), steer, say("Using the brief: …")]).length, 1);
+	});
+});

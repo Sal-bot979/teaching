@@ -22,6 +22,7 @@ for (const id of ids) {
 	console.log(`\n${chat.title} (${id}) — ${report.turns} turns, median ${report.medianWords} words/turn`);
 	if (report.resumePointRequired) console.log(`  resume point on stop: ${report.resumePointPresent ? "present" : "MISSING"}`);
 	for (const f of report.findings) console.log(`  ✗ [${f.rule}] turn ${f.turn}: ${f.detail}`);
+	if (report.unbriefedReferences.length) console.log(`  ? check by hand (no brief cites them): ${report.unbriefedReferences.join(", ")}`);
 	if (!report.findings.length) console.log("  ✓ no rule violations");
 }
 console.log(`\n${ids.length} session(s), ${violations} violation(s).`);

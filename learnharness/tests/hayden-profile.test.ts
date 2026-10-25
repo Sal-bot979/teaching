@@ -29,6 +29,7 @@ const { listSourceSegments } = await import("../src/agent/prompt-segments.ts");
 const { promptOverrides } = await import("../src/store/prompt-overrides.ts");
 const { readSettings, writeSettings } = await import("../src/store/settings.ts");
 const profile = await import("../hayden/profile.ts");
+const configModule = await import("../config.ts");
 
 const AGENTS = ["prober", "teacher", "practice"] as const;
 const GOLDEN = path.join(import.meta.dirname, "..", "hayden", "evals", "golden");
@@ -127,6 +128,18 @@ describe("Hayden profile — ON reaches all three agents", () => {
 		assert.equal(profile.profileStatus().file, "shipped profile");
 	});
 
+	it("a malformed settings.json is refused, not overwritten (critic round 1)", () => {
+		reset();
+		const { SETTINGS_FILE } = configModule;
+		const broken = '{"version":1,"models":{"strong":{"provider":"x","id":"y"}},}';
+		fs.writeFileSync(SETTINGS_FILE, broken);
+		assert.throws(() => profile.enableProfile(), /not valid settings JSON/);
+		assert.throws(() => profile.disableProfile(), /not valid settings JSON/);
+		assert.equal(fs.readFileSync(SETTINGS_FILE, "utf-8"), broken, "file untouched");
+		assert.equal(promptOverrides.readOverride(profile.PROFILE_SEGMENT), null, "no override written either");
+		reset();
+	});
+
 	it("the shipped source segment is empty (so 'off' can never leak profile text)", () => {
 		const src = fs.readFileSync(path.join(import.meta.dirname, "..", "src", "agent", "prompts", "shared", "90-learner-profile.md"), "utf-8");
 		assert.equal(src.trim(), "");
@@ -138,6 +151,10 @@ describe("Hayden profile — the text carries every requested clause", () => {
 	const required: Array<[string, RegExp]> = [
 		["defers to doctrine", /doctrine of the session you are running wins/],
 		["practice guard", /never license teaching beyond a surgical line/],
+		["practice keeps its progression", /In practice, progression stays the doctrine's/],
+		["practice repair via hint ladder", /In practice, that repair runs through the hint ladder/],
+		["practice: no correction while generable", /without stating the correction while the learner can still generate it/],
+		["practice: unretested miss on stop", /if a miss is still unretested, name it as the open question/],
 		["credentials are not evidence", /Credentials are a prior, not evidence/],
 		["advance once demonstrated", /once the learner has demonstrated something, move on/],
 		["one question per turn", /One main reasoning step and one substantive question per turn/],

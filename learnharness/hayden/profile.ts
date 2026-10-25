@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SETTINGS_FILE } from "../config.ts";
 import { composeInstructions } from "../src/agent/teacher-agent.ts";
 import { CURRENT_SETTINGS_VERSION } from "../src/core/settings.ts";
 import { readSettings, writeSettings } from "../src/store/settings.ts";
@@ -23,7 +24,13 @@ export const PROFILE_SEGMENT = "shared/90-learner-profile.md";
 export const PROFILE_TEXT = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "learner-profile.md"), "utf-8");
 
 function setSwitch(on: boolean): void {
-	const settings = readSettings() ?? { version: CURRENT_SETTINGS_VERSION };
+	const existing = readSettings();
+	// readSettings() also returns null for an unparseable file; writing then
+	// would silently replace the learner's whole record. Refuse instead.
+	if (existing === null && fs.existsSync(SETTINGS_FILE)) {
+		throw new Error(`${SETTINGS_FILE} exists but is not valid settings JSON — fix or move it first; nothing was changed.`);
+	}
+	const settings = existing ?? { version: CURRENT_SETTINGS_VERSION };
 	const agent = settings.agent ?? {};
 	writeSettings({ ...settings, agent: { ...agent, prompts: { ...(agent.prompts ?? {}), [PROFILE_SEGMENT]: on } } });
 }
@@ -33,8 +40,8 @@ function setSwitch(on: boolean): void {
 export function enableProfile(force = false): { wroteFile: boolean } {
 	const existing = promptOverrides.readOverride(PROFILE_SEGMENT);
 	const wroteFile = existing === null || force;
+	setSwitch(true); // first: a refused settings write must leave the override untouched too
 	if (wroteFile) promptOverrides.writeOverride(PROFILE_SEGMENT, PROFILE_TEXT);
-	setSwitch(true);
 	return { wroteFile };
 }
 

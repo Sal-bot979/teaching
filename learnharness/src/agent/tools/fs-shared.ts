@@ -53,9 +53,14 @@ export function studyRoot(): string {
  *  outside absolute path, or a symlink whose real target is outside. */
 export function resolveSourcePath(p?: string): string {
 	const root = studyRoot();
-	fsSync.mkdirSync(root, { recursive: true });
 	const resolved = !p ? root : path.resolve(root, p.startsWith("~") ? p.replace(/^~(?=$|\/)/, os.homedir()) : p);
-	const realRoot = fsSync.realpathSync(root);
+	let realRoot = root;
+	try {
+		realRoot = fsSync.realpathSync(root);
+	} catch {
+		// No study folder yet: nothing inside it exists, so the tools' own
+		// reads fail with ENOENT — read-only tools never create it.
+	}
 	let real = resolved;
 	try {
 		real = fsSync.realpathSync(resolved);

@@ -93,3 +93,37 @@ describe("study-folder boundary — every learner-file tool", () => {
 		await assert.rejects(() => findTool.execute!("c", { pattern: "*", path: "/" }), /Outside the study folder/);
 	});
 });
+
+describe("study-folder boundary — critic round 1", () => {
+	it("resolving paths never creates the study folder", () => {
+		const saved = process.env.LH_STUDY_DIR;
+		process.env.LH_STUDY_DIR = path.join(SANDBOX, "not-yet");
+		try {
+			assert.equal(resolveSourcePath("notes.md"), path.join(SANDBOX, "not-yet", "notes.md"));
+			assert.throws(() => resolveSourcePath("../outside/secret.txt"), /Outside the study folder/);
+			assert.equal(fs.existsSync(path.join(SANDBOX, "not-yet")), false);
+		} finally {
+			process.env.LH_STUDY_DIR = saved;
+		}
+	});
+
+	it("SVG figures cannot pull local files: external hrefs are stripped before either renderer", async () => {
+		const { stripExternalRefs, getHeadless } = await import("../src/agent/subagents/headless.ts");
+		const secretPng = path.join(OUTSIDE, "secret.png");
+		// a 1x1 red PNG
+		fs.writeFileSync(secretPng, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64"));
+		const svg = (href: string) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="20" height="20"><image ${href} width="20" height="20"/></svg>`;
+		for (const attack of [`href="${secretPng}"`, `xlink:href='file://${secretPng}'`, `href=${secretPng}`]) {
+			assert.doesNotMatch(stripExternalRefs(svg(attack)), /secret\.png/, attack);
+		}
+		const keep = `href="data:image/png;base64,AAAA"`;
+		assert.match(stripExternalRefs(svg(keep)), /data:image\/png/);
+		assert.match(stripExternalRefs('<svg><use href="#a"/></svg>'), /href="#a"/);
+		// End to end through resvg: the rendered pixel is the white background, not the secret's red.
+		const png = await getHeadless().renderSvg(svg(`href="${secretPng}"`));
+		const { Resvg } = await import("@resvg/resvg-js");
+		const probe = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="20" height="20"><image href="data:image/png;base64,${png.toString("base64")}" width="20" height="20"/></svg>`);
+		const pixels = probe.render().pixels;
+		assert.deepEqual([...pixels.subarray(0, 3)], [255, 255, 255], "no red pixel from the outside file");
+	});
+});

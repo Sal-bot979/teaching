@@ -412,7 +412,16 @@ function crc32(buf: Buffer): number {
 	return ~c >>> 0;
 }
 
-async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buffer> {
+/** Study-folder boundary (Hayden fork): a model-written SVG may reference
+ *  images by path (`<image href="/home/…/x.png">`), and both renderers
+ *  would read them from disk. Only inline data: URIs and in-document `#id`
+ *  references survive; every other href is dropped before rendering. */
+export function stripExternalRefs(svg: string): string {
+	return svg.replace(/\s(?:xlink:)?href\s*=\s*(?:(["'])(?!data:|#)[^"']*\1|(?!["'#]|data:)[^\s>]+)/gi, "");
+}
+
+async function renderSvg(rawSvg: string, opts: RenderSvgOptions = {}): Promise<Buffer> {
+	const svg = stripExternalRefs(rawSvg);
 	// NATIVE FIRST (Wave E stage 2, owner 2026-10-10): resvg rasterizes
 	// static SVG in-process — visual-maker SVGs never execute script, so a
 	// browser adds nothing but a process. White background mirrors the old
@@ -433,11 +442,13 @@ async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buff
 	} catch {
 		/* fall through to the browser path */
 	}
+	// Hayden fork: the page loads from file://, which could pull any local
+	// file (img, CSS url(), link); the CSP meta blocks every external fetch.
 	const dir = tempDir("lh-visual-");
 	const file = path.join(dir, "figure.html");
 	fs.writeFileSync(
 		file,
-		`<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#fff}svg{display:block}</style></head><body>${svg}</body></html>`,
+		`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'"><style>html,body{margin:0;padding:0;background:#fff}svg{display:block}</style></head><body>${svg}</body></html>`,
 		"utf-8",
 	);
 

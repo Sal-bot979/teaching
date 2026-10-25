@@ -27,7 +27,8 @@ process.env.OPENROUTER_API_KEY ??= "test-key-presence-gate";
 after(() => fs.rmSync(TMP_DATA, { recursive: true, force: true }));
 
 const { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall } = await import("@earendil-works/pi-ai");
-const { createPracticeAgent, createTeacherAgent } = await import("../src/agent/teacher-agent.ts");
+const { createPracticeAgent, createProberAgent, createTeacherAgent } = await import("../src/agent/teacher-agent.ts");
+const { jobStore } = await import("../src/store/jobs.ts");
 const { handleChatRequest } = await import("../src/server/chat-handler.ts");
 const { runningTurn } = await import("../src/server/turn-runs.ts");
 const { chatStore } = await import("../src/store/chats.ts");
@@ -114,6 +115,24 @@ describe("Hayden scenarios (scripted model, real request path)", () => {
 		await turn(chat.id, { type: "text", text: "LQ model" }, teacherFactory(engine));
 		assert.equal(seen[0]!.systemPrompt, upstreamTeacher());
 		assert.ok(!seen[0]!.systemPrompt.includes(PROFILE_MARK));
+	});
+
+	it("S0b prober — a fresh teaching session builds the PROBER through the handler, and it carries the profile", async () => {
+		profile.enableProfile();
+		const chat = newChat("S0b prober");
+		const { engine, seen } = scripted([() => fauxAssistantMessage([fauxText("What do you want to be able to do with the LQ model?")])]);
+		let built: string | undefined;
+		const factory: Factory = (opts) => {
+			built = opts.teaching ? "teacher" : "prober";
+			return opts.teaching
+				? createTeacherAgent(undefined, { ...opts, engine })
+				: createProberAgent({ chatId: chat.id, chatStore, deliver: () => {}, jobStore, spawn: () => {} }, { ...opts, engine });
+		};
+		await turn(chat.id, { type: "text", text: "LQ model" }, factory);
+		assert.equal(built, "prober", "the handler asked for the probe phase");
+		assert.ok(seen[0]!.systemPrompt.startsWith("# The agent"), "shared base first");
+		assert.ok(seen[0]!.systemPrompt.includes("# The probe"), "probe doctrine present");
+		assert.ok(seen[0]!.systemPrompt.endsWith(profile.PROFILE_TEXT.trim()), "profile appended last");
 	});
 
 	it("S1 correct explanation — the profile and the learner's own-words reasoning both reach the model", async () => {
