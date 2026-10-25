@@ -413,11 +413,19 @@ function crc32(buf: Buffer): number {
 }
 
 /** Study-folder boundary (Hayden fork): a model-written SVG may reference
- *  images by path (`<image href="/home/…/x.png">`), and both renderers
- *  would read them from disk. Only inline data: URIs and in-document `#id`
- *  references survive; every other href is dropped before rendering. */
+ *  local files (`<image href="/home/…/x.png">`, under any namespace
+ *  prefix), and both renderers would read them. Every `*href` attribute
+ *  whose value is not an inline `data:` URI or an in-document `#id` is
+ *  dropped; a DOCTYPE (entities could smuggle markup or values past this)
+ *  and `<meta>` (refresh navigation on the browser fallback) are removed. */
 export function stripExternalRefs(svg: string): string {
-	return svg.replace(/\s(?:xlink:)?href\s*=\s*(?:(["'])(?!data:|#)[^"']*\1|(?!["'#]|data:)[^\s>]+)/gi, "");
+	return svg
+		.replace(/<!DOCTYPE[^[>]*(\[[\s\S]*?\])?\s*>/gi, "")
+		.replace(/<meta\b[^>]*>/gi, "")
+		.replace(/\s(?:[\w.-]+:)?href\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (attr, raw: string) => {
+			const value = raw.replace(/^["']|["']$/g, "").trim();
+			return /^(data:|#)/i.test(value) ? attr : "";
+		});
 }
 
 async function renderSvg(rawSvg: string, opts: RenderSvgOptions = {}): Promise<Buffer> {

@@ -15,15 +15,23 @@ import type { LhMessage } from "../../src/core/native-messages.ts";
 const ASKING_TOOLS = new Set(["quiz", "probe", "ask_user_question", "explain", "recall", "problem"]);
 /** Learner-originated markers (system steers and graph context are not turns). */
 const LEARNER_MARKERS = new Set(["practice-thinking", "problem-dismissed"]);
-/** Praise aimed at the learner — "excellent spatial resolution" is not praise. */
-const PRAISE = /\b(great|excellent|good|nice|fantastic|superb|amazing|awesome|brilliant|perfect) (question|job|work|answer|thinking|catch)\b|\b(well done|you nailed it|nailed it|spot on|great stuff|bravo|kudos)\b|^\s*(great|excellent|perfect|awesome|superb|brilliant|amazing)[!.]/im;
-/** A stop is a statement about the session, not a word: "stopping power"
- *  and "need to go over the Bragg peak" are physics. */
-const STOP_INTENT = /^\s*(stop|pause|done|bye|later)\W*$|\b(stop(ping)? (here|now|for (now|today|tonight))|let'?s stop|pause (here|now|for now)|done for (now|today|tonight)|(need|have|got) to (go|leave|run)\b(?!\s+(over|through|back|into|to|with))|gotta (go|run)|call it a (day|night)|that'?s (all|it) for (now|today|tonight)|out of time|signing off)\b/i;
-/** Identifiers that must never appear in a synthetic-only session. */
-const PATIENT_ID = /\b(MRN|medical record (number|no\.?))\s*[:#]?\s*\d{4,}|\b(DOB|date of birth)\s*[:#]?\s*\d|\bpatient name\s*[:#]/i;
-/** Patient-specific framing in the TUTOR's prose (advice, not principles). */
-const PATIENT_ADVICE = /\b(for|in|treat) (this|your|my|the) patient\b|\byour patient('s)?\b/i;
+/** Praise aimed at the learner, shaped as an interjection or a direct
+ *  compliment — "excellent spatial resolution", "a good question to ask of
+ *  any dose calc" and "nice work function shift" are physics, not praise. */
+const PRAISE = /(^|[.!?]\s+|\n)\s*(great|excellent|nice|perfect|awesome|amazing|brilliant|outstanding|superb|fantastic|wonderful|lovely|very good|good job|well done)( (job|work|question|answer|thinking|catch|reasoning|point))?\s*([!.,;:]|\s[—–-]|$)|\b(you nailed it|nailed it|spot on|bravo|kudos|you'?re (really )?getting (this|it)|love (that|this|your) (reasoning|thinking|answer)|great (reasoning|thinking|work) there)\b/im;
+/** A stop is a statement about the session, not a word: "stopping power",
+ *  "need to go over the Bragg peak", "have to run the numbers" and "leave
+ *  a margin" are physics. Heuristic: a screen, not a verdict. */
+const STOP_INTENT = /^\s*(stop|pause|done|bye|later|thanks,? bye)\W*$|\b(stop(ping)? (here|there|now|for (now|today|tonight))|i'?ll stop (here|there)|let'?s (stop|wrap up|pause)|wrap(ping)? (it )?up|pause (here|now|for now)|done for (now|today|tonight)|call it a (day|night)|that'?s (all|it) for (now|today|tonight)|out of time|signing off|pick (this|it) up (tomorrow|later|next time|another time)|(need|have|got|gotta) to (go|leave|run|head out|bounce)(\s+(now|soon|in a (sec|minute)))?\s*([.!,;]|$)|gotta (go|run|head out|bounce)\b|need to bounce|head(ing)? out\s*([.!,;]|$)|\bbye\b[!.]?\s*$)/i;
+/** Identifier shapes that must never appear in a synthetic-only session
+ *  (6+ digit record numbers, dated DOBs, named people). */
+const PATIENT_ID = /\b(MRN|medical record (number|no\.?)|patient id)\s*[-:#]?\s*[A-Z]{0,2}\d{6,}|\b(DOB|date of birth)\s*[:#]?\s*(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{2}-\d{2}|[A-Z][a-z]+\.? \d{1,2},? \d{4})/i;
+/** Named individuals (case-sensitive: "Name: John Smith", "Mr. Smith"). */
+const NAMED_PERSON = /\b(Patient )?[Nn]ame\s*:\s*[A-Z][a-z]+ [A-Z][a-z]+|\b(Mr|Mrs|Ms|Miss)\.? [A-Z][a-z]+/;
+/** Patient-specific framing in the TUTOR's prose. "Patient-specific QA"
+ *  and "the patient population studied" are physics and are not flagged;
+ *  general guidance ("for a patient with a pacemaker…") is not either. */
+const PATIENT_ADVICE = /\b(for|in|treat) (this|your|my) patient\b|\byour patient('s)?\b|\bin your (case|patient)\b/i;
 const SOURCE_REF = /(https?:\/\/[^\s)\]>"']+|\b10\.\d{4,9}\/[^\s)\]>"']+)/g;
 /** Named guideline/report identifiers — listed for a human check when no
  *  brief or learner message carries them (too common to call violations). */
@@ -113,7 +121,7 @@ export function checkTranscript(messages: readonly LhMessage[]): Report {
 	});
 	for (const [i, turn] of turns.entries()) {
 		const all = turn.map(textOf).join("\n");
-		const hit = PATIENT_ID.exec(all);
+		const hit = PATIENT_ID.exec(all) ?? NAMED_PERSON.exec(all);
 		if (hit) findings.push({ rule: "synthetic-only", turn: i, detail: `patient-identifier pattern "${hit[0]}"` });
 	}
 

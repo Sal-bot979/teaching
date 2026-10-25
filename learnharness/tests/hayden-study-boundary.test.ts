@@ -127,3 +127,38 @@ describe("study-folder boundary — critic round 1", () => {
 		assert.deepEqual([...pixels.subarray(0, 3)], [255, 255, 255], "no red pixel from the outside file");
 	});
 });
+
+describe("study-folder boundary — critic round 2 (SVG bypasses)", () => {
+	const RED = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+	async function firstPixel(png: Buffer): Promise<number[]> {
+		const { Resvg } = await import("@resvg/resvg-js");
+		const probe = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="data:image/png;base64,${png.toString("base64")}" width="20" height="20"/></svg>`);
+		return [...probe.render().pixels.subarray(0, 3)];
+	}
+
+	it("any namespace prefix, apostrophes in the path, DOCTYPE entities: nothing is read from disk", async () => {
+		const { stripExternalRefs, getHeadless } = await import("../src/agent/subagents/headless.ts");
+		const apostropheDir = path.join(OUTSIDE, "o'neil");
+		fs.mkdirSync(apostropheDir, { recursive: true });
+		const plain = path.join(OUTSIDE, "red.png");
+		const quoted = path.join(apostropheDir, "red.png");
+		fs.writeFileSync(plain, Buffer.from(RED, "base64"));
+		fs.writeFileSync(quoted, Buffer.from(RED, "base64"));
+		const attacks = [
+			`<svg xmlns="http://www.w3.org/2000/svg" xmlns:foo="http://www.w3.org/1999/xlink" width="20" height="20"><image foo:href="${plain}" width="20" height="20"/></svg>`,
+			`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="${quoted}" width="20" height="20"/></svg>`,
+			`<!DOCTYPE svg [<!ENTITY p "${plain}">]><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="&p;" width="20" height="20"/></svg>`,
+		];
+		for (const svg of attacks) {
+			assert.doesNotMatch(stripExternalRefs(svg), /red\.png|ENTITY/, svg);
+			assert.deepEqual(await firstPixel(await getHeadless().renderSvg(svg)), [255, 255, 255], `leaked: ${svg}`);
+		}
+	});
+
+	it("<meta> (refresh navigation on the browser fallback) is removed; data: images survive", async () => {
+		const { stripExternalRefs } = await import("../src/agent/subagents/headless.ts");
+		assert.doesNotMatch(stripExternalRefs('<svg><meta http-equiv="refresh" content="0;url=file:///etc/passwd"/><rect/></svg>'), /meta|passwd/);
+		const inline = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="data:image/png;base64,${RED}" width="20" height="20"/></svg>`;
+		assert.equal(stripExternalRefs(inline), inline);
+	});
+});

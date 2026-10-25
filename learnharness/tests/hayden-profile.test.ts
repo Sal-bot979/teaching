@@ -140,6 +140,20 @@ describe("Hayden profile — ON reaches all three agents", () => {
 		reset();
 	});
 
+	it("on/off edit only the profile key: odd or unknown fields survive verbatim (critic round 2)", () => {
+		reset();
+		const { SETTINGS_FILE } = configModule;
+		fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ version: "one", agent: { prompts: { a: "yes" }, model: { x: 1 } }, future: [1, 2] }));
+		profile.enableProfile();
+		profile.disableProfile();
+		assert.deepEqual(JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")), {
+			version: "one",
+			agent: { prompts: { a: "yes", [profile.PROFILE_SEGMENT]: false }, model: { x: 1 } },
+			future: [1, 2],
+		});
+		reset();
+	});
+
 	it("the shipped source segment is empty (so 'off' can never leak profile text)", () => {
 		const src = fs.readFileSync(path.join(import.meta.dirname, "..", "src", "agent", "prompts", "shared", "90-learner-profile.md"), "utf-8");
 		assert.equal(src.trim(), "");

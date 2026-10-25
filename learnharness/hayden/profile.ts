@@ -17,22 +17,33 @@ import { fileURLToPath } from "node:url";
 import { SETTINGS_FILE } from "../config.ts";
 import { composeInstructions } from "../src/agent/teacher-agent.ts";
 import { CURRENT_SETTINGS_VERSION } from "../src/core/settings.ts";
-import { readSettings, writeSettings } from "../src/store/settings.ts";
+import { readSettings } from "../src/store/settings.ts";
 import { promptOverrides } from "../src/store/prompt-overrides.ts";
 
 export const PROFILE_SEGMENT = "shared/90-learner-profile.md";
 export const PROFILE_TEXT = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "learner-profile.md"), "utf-8");
 
 function setSwitch(on: boolean): void {
-	const existing = readSettings();
-	// readSettings() also returns null for an unparseable file; writing then
-	// would silently replace the learner's whole record. Refuse instead.
-	if (existing === null && fs.existsSync(SETTINGS_FILE)) {
-		throw new Error(`${SETTINGS_FILE} exists but is not valid settings JSON — fix or move it first; nothing was changed.`);
+	// Edit ONLY our key in the raw record: everything else in the file —
+	// including fields the app's sanitizer would drop — is left exactly as is.
+	let record: Record<string, unknown> = { version: CURRENT_SETTINGS_VERSION };
+	if (fs.existsSync(SETTINGS_FILE)) {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+		} catch {
+			parsed = undefined;
+		}
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+			throw new Error(`${SETTINGS_FILE} exists but is not valid settings JSON — fix or move it first; nothing was changed.`);
+		}
+		record = parsed as Record<string, unknown>;
 	}
-	const settings = existing ?? { version: CURRENT_SETTINGS_VERSION };
-	const agent = settings.agent ?? {};
-	writeSettings({ ...settings, agent: { ...agent, prompts: { ...(agent.prompts ?? {}), [PROFILE_SEGMENT]: on } } });
+	const agent = record.agent !== null && typeof record.agent === "object" && !Array.isArray(record.agent) ? (record.agent as Record<string, unknown>) : {};
+	const prompts = agent.prompts !== null && typeof agent.prompts === "object" && !Array.isArray(agent.prompts) ? (agent.prompts as Record<string, unknown>) : {};
+	const next = { ...record, agent: { ...agent, prompts: { ...prompts, [PROFILE_SEGMENT]: on } } };
+	fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+	fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, "\t"), "utf-8");
 }
 
 /** Switch the profile on. A customized override already on disk is kept

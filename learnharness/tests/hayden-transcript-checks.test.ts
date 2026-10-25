@@ -90,3 +90,34 @@ describe("transcript checks — critic round 1 regressions", () => {
 		assert.equal(turnsOf([user("go"), ask("research"), result("research"), steer, say("Using the brief: …")]).length, 1);
 	});
 });
+
+describe("transcript checks — critic round 2 regressions", () => {
+	const stopRules = (text: string) => rules([user(text), say("ok")]);
+	it("physics sentences are not stops", () => {
+		for (const t of ["I have to run the numbers for the TG-51 check first", "We need to leave a margin for setup error", "I have to leave room for the PTV expansion", "What sets the stopping power?"]) {
+			assert.deepEqual(stopRules(t), [], t);
+		}
+	});
+	it("real stops are caught", () => {
+		for (const t of ["Let's wrap up", "I'll stop there", "gotta head out", "thanks, bye!", "Let's pick this up tomorrow", "need to bounce", "I have to go.", "call it a day"]) {
+			assert.deepEqual(stopRules(t), ["resume-point-on-stop"], t);
+		}
+	});
+	it("physics phrasing is not praise; interjections and compliments are", () => {
+		for (const t of ["This is a good question to ask of any dose calc.", "Nice work function shift in that metal.", "Film gives excellent spatial resolution.", "The great majority of dose is deposited early."]) {
+			assert.deepEqual(rules([user("x"), say(t)]), [], t);
+		}
+		for (const t of ["Great — that's the right sign.", "Great reasoning there.", "Very good.", "Outstanding.", "Nice!", "Exactly, you're really getting this!", "Love that reasoning."]) {
+			assert.deepEqual(rules([user("x"), say(t)]), ["no-performed-praise"], t);
+		}
+	});
+	it("patient wording: physics phrases pass; identifiers and individual framing are flagged", () => {
+		for (const t of ["For the patient-specific QA, gamma criteria are 3%/2mm.", "In the patient population studied, toxicity rose.", "MRN 4000 is not a format anyone uses.", "Set the DOB 2 field."]) {
+			assert.deepEqual(rules([user("x"), say(t)]), [], t);
+		}
+		for (const t of ["MRN-1234567", "MRN: A123456", "Patient ID: 4471234", "DOB: March 4 1961", "Name: John Smith, 62M", "Mr. Smith should get 70 Gy"]) {
+			assert.deepEqual(rules([user(t), say("Synthetic cases only.")]), ["synthetic-only"], t);
+		}
+		assert.deepEqual(rules([user("x"), say("In your case the cord limit is lower.")]), ["no-patient-specific-advice"]);
+	});
+});
