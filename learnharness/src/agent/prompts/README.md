@@ -20,3 +20,6 @@ Rules for adding a fragment:
 - Document YOUR agent's tools/behaviors exactly; reference tool input field names verbatim (they must match the zod schemas).
 - Keep it tight: fragments are always in context. No restating the base prompt.
 - The two agents share one transcript but never one toolset — never reference the other agent's tools as if you had them.
+## Hayden fork — the opt-in learner profile
+
+`shared/90-learner-profile.md` is deliberately EMPTY in source: empty segments are dropped by `composeInstructions`, so with the profile off every agent's prompt is unchanged. The profile text lives in `hayden/learner-profile.md` and is applied through the ordinary override mechanism (override file + `agent.prompts` switch) by `npx tsx hayden/profile.ts on|off|status`, or by hand in Settings → Agent → Prompts. It is on the practice agent's shared allowlist (`src/agent/prompt-segments.ts`), so one switch reaches prober, teacher, and practice.

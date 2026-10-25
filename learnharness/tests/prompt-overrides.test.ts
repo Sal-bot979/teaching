@@ -185,6 +185,9 @@ describe("the source-derived segment list", () => {
 				"shared/25-confidence.md",
 				"shared/30-learner-files.md",
 				"shared/40-formatting.md",
+				// Hayden fork: the opt-in learner profile (empty source — composes
+				// nothing until its override is switched on).
+				"shared/90-learner-profile.md",
 			],
 		);
 		assert.equal(teacher.some((s) => s.path === "teacher/05-method.md"), true);
