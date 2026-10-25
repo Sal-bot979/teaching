@@ -1,6 +1,6 @@
 # What changed and why
 
-Upstream app code changed: **8 files, +67 / −12 lines**. The other ~1,800 lines are new tests, the `hayden/` folder (profile text, toggle script, templates, eval tools, upstream goldens) and docs. Nothing in the knowledge graph, sessions/persistence, providers, UI components or the license was touched.
+Upstream app code changed: **8 files, +75 / −12 lines**. The other ~1,800 lines are new tests, the `hayden/` folder (profile text, toggle script, templates, eval tools, upstream goldens) and docs. Nothing in the knowledge graph, sessions/persistence, providers, UI components or the license was touched.
 
 ## Upstream source files
 
@@ -11,7 +11,7 @@ Upstream app code changed: **8 files, +67 / −12 lines**. The other ~1,800 line
 | `src/agent/prompts/README.md` | +1 paragraph | Documents the empty-segment design for the next maintainer. |
 | `src/agent/tools/fs-shared.ts` | `studyRoot()`; `resolveSourcePath` now confines paths | **Security exception.** Upstream resolved learner paths against the entire home directory. Now relative paths resolve inside `LH_STUDY_DIR` (default `<data>/study`). Traversal, outside absolute paths, `~`, and symlinks whose real target is outside are rejected with an error the model sees. |
 | `src/agent/subagents/runner.ts` | PDF job path goes through `resolveSourcePath` | The learner PDF job read raw paths. It now follows the same boundary, and a refusal becomes a normal "PDF failed" brief. |
-| `src/agent/subagents/headless.ts` | `stripExternalRefs` before SVG rendering; CSP meta on the browser-fallback page | **Security, added in repair round 1.** A model-written SVG figure could load any local image by absolute path (`<image href="/home/…">`), through resvg or the `file://` fallback page. External hrefs are now dropped and the fallback blocks every external fetch. `data:` images and `#id` references still work. |
+| `src/agent/subagents/headless.ts` | `stripExternalRefs` before SVG rendering; CSP meta on the browser-fallback page | **Security, added in repair round 1.** A model-written SVG figure could load any local image by absolute path (`<image href="/home/…">`), through resvg or the `file://` fallback page. Any `*href` (any namespace prefix) that isn't `data:` or `#id` is dropped, DOCTYPE and `<meta>` are removed (round 2), and the fallback blocks every external fetch. `data:` images and `#id` references still work. |
 | `src/agent/prompts/shared/30-learner-files.md` | 1 sentence | The doctrine said paths resolve against the home directory, which is no longer true. |
 | `src/agent/prompts/teacher/40-jobs.md` | 2 words | "home-anchored" → "anchored to his study folder", for the same reason. |
 
@@ -35,7 +35,7 @@ Upstream app code changed: **8 files, +67 / −12 lines**. The other ~1,800 line
 | `hayden/evals/retention-protocol.md`, `results.csv` | A 7-day n-of-1 on/off comparison you run yourself. |
 | `hayden/evals/seed-demo.ts` | Writes scripted demo sessions into a throwaway data dir, for the screenshots. |
 | `hayden/evals/golden/upstream-*.txt` | Upstream's own composed prompts, captured from the pristine checkout. |
-| `tests/hayden-*.test.ts` | 4 new test files, 66 tests ([results](03-results.md)). |
+| `tests/hayden-*.test.ts` | 4 new test files, 73 tests, plus 1 in `jobs.test.ts` ([results](03-results.md)). |
 
 ## Profile clauses and their evidence
 

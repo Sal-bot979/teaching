@@ -4,12 +4,12 @@ All runs were in this cloud container (Node 22) with deterministic fixtures. **N
 
 ## Upstream baseline vs fork
 
-| Check | Upstream `b277ee3` (unmodified) | Fork, frozen candidate | Fork after repair round 1 |
-|---|---|---|---|
-| `npm test` | 2,126 / 2,129 pass | 2,174 / 2,176 | **2,194 / 2,196** |
-| `npm run lint` | pass | pass | **pass** |
-| `npm run typecheck` | pass | pass | **pass** |
-| `npm run build` | pass | pass | **pass** |
+| Check | Upstream `b277ee3` (unmodified) | Fork, frozen candidate | After repair round 1 | After repair round 2 |
+|---|---|---|---|---|
+| `npm test` | 2,126 / 2,129 pass | 2,174 / 2,176 | 2,194 / 2,196 | **2,201 / 2,203** |
+| `npm run lint` | pass | pass | pass | **pass** |
+| `npm run typecheck` | pass | pass | pass | **pass** |
+| `npm run build` | pass | pass | pass | **pass** |
 
 **Every remaining failure is pre-existing upstream behavior in a file the fork doesn't touch:**
 
@@ -17,12 +17,12 @@ All runs were in this cloud container (Node 22) with deterministic fixtures. **N
 |---|---|---|
 | `subscription-auth`: "main loader resolves Pi's import-only PUBLIC package exports…" | fails every run | `ERR_PACKAGE_PATH_NOT_EXPORTED` from `@earendil-works/pi-ai` in this environment |
 | `chatgpt-connection-ui`: "real main/control bridge…" | flaky (failed 1 of 4 reruns on pristine upstream, 0 of 4 on the fork) | timing |
-| `chatgpt-auth`: "repeated real verified sign-in…" | flaky (failed at baseline, passes on most reruns) | timing |
+| `chatgpt-auth` (2 different tests across runs) | flaky under full-suite load (failed in the baseline full run; passes 5 of 5 in isolation on both pristine upstream and the fork) | timing |
 | `demos`: "runJob still steers on visual failure…" | flaky (failed at baseline only) | timing |
 
 The frozen candidate had one real regression: `prompt-overrides` pinned the exact segment list, and the new empty profile segment is now on it. That pin was updated on purpose and documented in [changes](02-changes.md).
 
-## What the new tests prove (67 tests)
+## What the new tests prove (74 tests)
 
 | Claim | Evidence | Test |
 |---|---|---|
@@ -65,7 +65,22 @@ Not fixed: `ls` shows whether a symlink's target is a directory. This leaks one 
 
 ### Round 2
 
-_In progress: a fresh critic on the repair diff only._
+A fresh critic attacked only the round-1 repair. **Confirmed and fixed in `70c342a`:**
+
+| Finding | Fix |
+|---|---|
+| **High:** the SVG stripper missed other namespace prefixes (`foo:href` bound to XLink) and paths containing an apostrophe; resvg read the file | Any-prefix `*href` matcher with a correct quoted/unquoted value grammar; DOCTYPE and `<meta>` removed; end-to-end pixel tests for each vector |
+| **Medium:** checker false positives ("have to run the numbers", "leave a margin", "good question to ask of any dose calc", "patient-specific QA", "MRN 4000") and false negatives ("let's wrap up", "Great —", "Very good.", "MRN-1234567", "DOB: March 4 1961", "Mr. Smith") | Sentence-shaped stop and praise patterns; real identifier shapes; 4 regression tests covering every case the critic listed |
+| **Low:** `profile.ts` rewrote odd-but-valid fields through the app's sanitizer | It edits only its own key in the raw JSON; test |
+| **Low:** the browser fallback is easy to reach (SVG without `xmlns`) | Same sanitizer runs before both paths; the CSP stays as a second layer |
+
+The critic confirmed these held: the study-folder boundary (missing root, symlinked root, dangling root), write ordering in `profile.ts`, practice deferral in the profile text, and the legitimate figures (`data:` images, `#id` references).
+
+**The checker is a screen, not a judge.** It now passes every realistic sentence the critics produced, but it's built on patterns. Read its findings before logging them in `results.csv`.
+
+### Round 3
+
+_In progress: a fresh critic aimed only at the SVG stripper._
 
 ## Known limitations
 
