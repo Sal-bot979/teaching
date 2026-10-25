@@ -4,12 +4,14 @@ All runs were in this cloud container (Node 22) with deterministic fixtures. **N
 
 ## Upstream baseline vs fork
 
-| Check | Upstream `b277ee3` (unmodified) | Fork, frozen candidate | After repair round 1 | After repair round 2 |
-|---|---|---|---|---|
-| `npm test` | 2,126 / 2,129 pass | 2,174 / 2,176 | 2,194 / 2,196 | **2,201 / 2,203** |
-| `npm run lint` | pass | pass | pass | **pass** |
-| `npm run typecheck` | pass | pass | pass | **pass** |
-| `npm run build` | pass | pass | pass | **pass** |
+| Check | Upstream `b277ee3` (unmodified) | Fork, frozen candidate | After round 1 | After round 2 | **Final (after round 3)** |
+|---|---|---|---|---|---|
+| `npm test` | 2,126 / 2,129 pass | 2,174 / 2,176 | 2,194 / 2,196 | 2,201 / 2,203 | **2,202 / 2,204** |
+| `npm run lint` | pass | pass | pass | pass | **pass** |
+| `npm run typecheck` | pass | pass | pass | pass | **pass** |
+| `npm run build` | pass | pass | pass | pass | **pass** |
+
+The final run fails exactly two tests, both of which also failed on unmodified upstream at baseline: `chatgpt-auth` "repeated real verified sign-in…" and `subscription-auth` "main loader…".
 
 **Every remaining failure is pre-existing upstream behavior in a file the fork doesn't touch:**
 
@@ -22,7 +24,7 @@ All runs were in this cloud container (Node 22) with deterministic fixtures. **N
 
 The frozen candidate had one real regression: `prompt-overrides` pinned the exact segment list, and the new empty profile segment is now on it. That pin was updated on purpose and documented in [changes](02-changes.md).
 
-## What the new tests prove (74 tests)
+## What the new tests prove (75 tests)
 
 | Claim | Evidence | Test |
 |---|---|---|
@@ -78,9 +80,21 @@ The critic confirmed these held: the study-folder boundary (missing root, symlin
 
 **The checker is a screen, not a judge.** It now passes every realistic sentence the critics produced, but it's built on patterns. Read its findings before logging them in `results.csv`.
 
-### Round 3
+### Round 3 (the last of 3 allowed)
 
-_In progress: a fresh critic aimed only at the SVG stripper._
+A fresh critic was aimed only at the SVG stripper, the one regex-based security control. It found **no leak on the resvg path**. It also confirmed the control is load-bearing: with the stripper bypassed, resvg reads local files through `<image>` and `<feImage>`.
+
+These held:
+- xlink and uppercase hrefs, tab or newline before the attribute
+- `<a>`, nested `<svg>`, `<feImage>`, `<pattern>`, external `<use>`
+- duplicate attributes, xml:base, entities without DOCTYPE, CDATA
+- CSS `@import` and `url()` (resvg fetches neither)
+
+Valid figures still render.
+
+One theoretical gap was noted: a lenient HTML-mode parse on the browser fallback would accept an href glued to the previous attribute's quote (`x="0"href="…"`), although the fallback's CSP would still block the fetch. That was closed anyway in the round-3 commit, with a test.
+
+The repair budget is spent and acceptance passes, so the review stops here.
 
 ## Known limitations
 
