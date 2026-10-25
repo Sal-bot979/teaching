@@ -80,7 +80,7 @@ fs.writeFileSync(path.join(studyRoot(), "README.txt"), "Put study materials (not
 {
 	const c = chat("Demo · LQ model — stopped mid-session");
 	const e = engineOf([
-		() => fauxAssistantMessage([fauxText("> **Resume point**\n> - **Established:** you derived why larger fractions raise late-tissue BED (the $d/(\\alpha/\\beta)$ term), in your own words.\n> - **Open question:** whether LQ still holds above ~8–10 Gy per fraction. You suspected not; that's unresolved.\n> - **Next step:** compare 50 Gy/25 fx with 40 Gy/10 fx at $\\alpha/\\beta = 3$ and $10$.")]),
+		() => fauxAssistantMessage([fauxText("> **Resume point**\n> - **Established:** you derived why larger fractions raise late-tissue BED (the $d/(\\alpha/\\beta)$ term), in your own words.\n> - **Open question:** whether LQ still holds above ~8–10 Gy per fraction. You suspected not; that's unresolved.\n> - **Next step:** work out the dose per fraction at which the linear and quadratic terms are equal for $\\alpha/\\beta = 3$ Gy, and what that says about large fractions.")]),
 	]);
 	await turn(c.id, { type: "text", text: "Need to go — stopping here." }, teacher(e));
 }
