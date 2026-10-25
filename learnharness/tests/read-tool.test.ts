@@ -14,6 +14,9 @@ import { describe, it } from "node:test";
 import { readTool } from "../src/agent/tools/read.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lh-read-test-"));
+// Hayden fork: the read tool is confined to the study folder — this file's
+// scratch dir is the study root.
+process.env.LH_STUDY_DIR = tmp;
 
 function write(name: string, content: string): string {
 	const file = path.join(tmp, name);
@@ -38,18 +41,11 @@ describe("read tool — text semantics", () => {
 		assert.equal(details, "hello\nworld", "the record part output carries the string verbatim");
 	});
 
-	it("resolves relative paths against the learner's home (sources v1 anchoring)", async () => {
-		// sources v1: the harness has no meaningful cwd — "find my notes" must
-		// work from a bare relative path, so the home directory is the anchor
-		// (fs-shared resolveSourcePath). Scratch file in home, cleaned up.
-		const rel = `lh-read-rel-test-${process.pid}.txt`;
-		const homeFile = path.join(os.homedir(), rel);
-		fs.writeFileSync(homeFile, "rel", "utf-8");
-		try {
-			assert.equal((await run({ path: rel })).text, "rel");
-		} finally {
-			fs.unlinkSync(homeFile);
-		}
+	it("resolves relative paths against the study folder (Hayden fork anchoring)", async () => {
+		// Upstream anchored relative paths at the home directory; the fork
+		// anchors them at the study folder (fs-shared studyRoot).
+		write("rel.txt", "rel");
+		assert.equal((await run({ path: "rel.txt" })).text, "rel");
 	});
 
 	it("honors offset (1-indexed) and limit", async () => {

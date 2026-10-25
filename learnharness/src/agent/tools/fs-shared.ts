@@ -1,6 +1,8 @@
+import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { PATHS } from "../../../config.ts";
 
 /**
  * Shared plumbing for the learner-filesystem tools (ls / find / grep) —
@@ -13,6 +15,8 @@ import * as path from "node:path";
  * deliberate scope widening vs pi: relative paths and default roots resolve
  * against the LEARNER'S HOME, not a project cwd — the harness has no
  * meaningful working directory, and "find my notes" should just work.
+ * (Hayden fork: narrowed from the home directory to the study folder —
+ * see studyRoot below.)
  *
  * Ported behaviors (mirroring pi's dist/core/tools/{ls,find,grep}.js): the
  * schemas, descriptions, output formats, and truncation notices are copied
@@ -35,12 +39,38 @@ export const WALK_TIMEOUT_MS = 10_000;
  */
 const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]);
 
-/** Resolve a tool path argument: absolute stays, relative/absent → home.
- *  (pi resolves against the project cwd; the harness's "project" is the
- *  learner's life, so the home directory is the anchor.) */
+/** The study-materials root (Hayden fork, documented security exception to
+ *  the minimal-diff rule): learner-file tools reach ONLY this folder, never
+ *  the whole home directory. LH_STUDY_DIR relocates it (read per call, so
+ *  tests and launchers can set it late); unset → <data dir>/study. */
+export function studyRoot(): string {
+	return process.env.LH_STUDY_DIR ? path.resolve(process.env.LH_STUDY_DIR) : path.join(PATHS.data, "study");
+}
+
+/** Resolve a tool path argument against the study root: relative/absent →
+ *  inside it, absolute allowed only when inside it. Throws (the model sees
+ *  the error result) on anything that leaves the root — `..` traversal, an
+ *  outside absolute path, or a symlink whose real target is outside. */
 export function resolveSourcePath(p?: string): string {
-	if (!p) return os.homedir();
-	return path.isAbsolute(p) ? p : path.join(os.homedir(), p);
+	const root = studyRoot();
+	fsSync.mkdirSync(root, { recursive: true });
+	const resolved = !p ? root : path.resolve(root, p.startsWith("~") ? p.replace(/^~(?=$|\/)/, os.homedir()) : p);
+	const realRoot = fsSync.realpathSync(root);
+	let real = resolved;
+	try {
+		real = fsSync.realpathSync(resolved);
+	} catch {
+		// Not there yet: the lexical check below decides; the tool's own read
+		// then fails with ENOENT as before.
+	}
+	const inside = (child: string, parent: string) => child === parent || child.startsWith(parent + path.sep);
+	if (!inside(resolved, root) && !inside(resolved, realRoot)) {
+		throw new Error(`Outside the study folder: learner-file tools only reach ${root}. Ask the learner to put the file there.`);
+	}
+	if (real !== resolved && !inside(real, realRoot)) {
+		throw new Error(`Outside the study folder: ${p} links outside ${root}.`);
+	}
+	return resolved;
 }
 
 /** pi's formatSize idiom (50KB prints as "50.0KB"). */

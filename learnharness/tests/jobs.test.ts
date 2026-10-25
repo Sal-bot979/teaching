@@ -715,6 +715,8 @@ describe("research runner (async protocol §3)", () => {
 
 
 describe("pdf runner (sources v0)", () => {
+	// Hayden fork: learner PDF paths are confined to the study folder.
+	process.env.LH_STUDY_DIR = path.join(import.meta.dirname, "fixtures");
 	const PDF_FIXTURE = path.join(import.meta.dirname, "fixtures", "sample-3page.pdf");
 	const PDF_INPUT = { path: PDF_FIXTURE, question: "What is the integral of x dx?" };
 
@@ -784,6 +786,25 @@ describe("pdf runner (sources v0)", () => {
 
 		const steer = delivery.steers[0]!;
 		assert.ok(steer.content.includes("flag the gap"), "the teacher learns to flag the gap");
+	});
+
+	it("Hayden fork: a PDF outside the study folder fails the job before anything is read", async () => {
+		const chat = chatStore.createChat("Test: pdf runner boundary");
+		trackChat(chat.id);
+		const job = jobStore.createJob({ kind: "pdf", chatId: chat.id, toolCallId: "call-pdf3" });
+		trackJob(job.id);
+		const delivery = fakeDeliver();
+		const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver });
+		pdfModelOverride.current = pdfReaderModel();
+		try {
+			await runner.runJob(job.id, { path: path.join(import.meta.dirname, "..", "package.json"), question: "anything" });
+		} finally {
+			pdfModelOverride.current = undefined;
+		}
+		const done = jobStore.getJob(job.id)!;
+		assert.equal(done.status, "error");
+		assert.match((done.result as PdfResult).brief, /^PDF failed: Outside the study folder/);
+		assert.deepEqual((done.result as PdfResult).pagesRead, []);
 	});
 });
 
@@ -1405,7 +1426,7 @@ describe("prompt composition", () => {
 			const instructions = composeInstructions(kind);
 			assert.ok(instructions.includes("## Learner files"), `${kind} carries the shared learner-files fragment`);
 			assert.ok(instructions.includes("find it yourself with `find`"), `${kind} knows to locate files itself`);
-			assert.ok(instructions.includes("home directory"), `${kind} knows the home-anchored path rule`);
+			assert.ok(instructions.includes("study folder"), `${kind} knows the study-folder path rule`);
 		}
 		// the agent's OWN fragments compose before the shared appendix
 		// (the reorder's order rule, 2026-09-27: job and method lead)

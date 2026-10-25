@@ -27,6 +27,10 @@ import { readTool } from "../src/agent/tools/read.ts";
  *   binary.bin                NUL byte — grep skips
  */
 
+// Hayden fork: the tools are confined to the study folder — the fixtures
+// live in the OS temp dir, so that is the study root for this file.
+process.env.LH_STUDY_DIR = os.tmpdir();
+
 let FIXTURE: string;
 
 /** Drive one tool's native execute and return the model-facing text
@@ -105,7 +109,7 @@ describe("ls (pi port)", () => {
 	});
 
 	it("missing path and non-directory throw (the model sees the error)", async () => {
-		await assert.rejects(async () => lsTool.execute!("c", { path: "/nonexistent/xyz" }), /Path not found/);
+		await assert.rejects(async () => lsTool.execute!("c", { path: path.join(FIXTURE, "nonexistent", "xyz") }), /Path not found/);
 		await assert.rejects(
 			async () => lsTool.execute!("c", { path: path.join(FIXTURE, "binary.bin") }),
 			/Not a directory/,

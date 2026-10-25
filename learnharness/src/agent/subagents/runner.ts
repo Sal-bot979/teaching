@@ -27,6 +27,7 @@ import { ROLE_SLOT, modelsNotConfigured, type ModelSlotName, type ProviderKeyMis
 import type { ChatStore, JobStore } from "../../core/ports.ts";
 import { runDemoBuilder } from "./demo-builder.ts";
 import { runPdfReaderAgent } from "./pdf-reader.ts";
+import { resolveSourcePath } from "../tools/fs-shared.ts";
 import { runResearcherAgent } from "./researcher.ts";
 import { runVisualMaker } from "./visual-maker.ts";
 
@@ -488,8 +489,11 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 
 		try {
 			jobStore.updateJob(jobId, { activity: "reading pdf" });
+			// Study-folder boundary (Hayden fork): a learner PDF path resolves
+			// like every learner-file tool's — outside the folder throws, and
+			// the catch below reports it as a failed job.
 			const result = await runPdfReaderAgent(
-				{ path, question },
+				{ path: resolveSourcePath(path), question },
 			{
 				engine: model,
 				abortSignal: loop.abortSignal,
