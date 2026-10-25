@@ -161,4 +161,10 @@ describe("study-folder boundary — critic round 2 (SVG bypasses)", () => {
 		const inline = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="data:image/png;base64,${RED}" width="20" height="20"/></svg>`;
 		assert.equal(stripExternalRefs(inline), inline);
 	});
+
+	it("an href glued to the previous attribute's quote is stripped too (HTML-mode fallback parses it; critic round 3)", async () => {
+		const { stripExternalRefs } = await import("../src/agent/subagents/headless.ts");
+		assert.doesNotMatch(stripExternalRefs('<svg><image x="0"href="/etc/secret.png"/></svg>'), /secret/);
+		assert.doesNotMatch(stripExternalRefs("<svg><image x='0'xlink:href='/etc/secret.png'/></svg>"), /secret/);
+	});
 });

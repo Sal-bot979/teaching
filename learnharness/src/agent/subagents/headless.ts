@@ -422,7 +422,7 @@ export function stripExternalRefs(svg: string): string {
 	return svg
 		.replace(/<!DOCTYPE[^[>]*(\[[\s\S]*?\])?\s*>/gi, "")
 		.replace(/<meta\b[^>]*>/gi, "")
-		.replace(/\s(?:[\w.-]+:)?href\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (attr, raw: string) => {
+		.replace(/(?:\s|(?<=["']))(?:[\w.-]+:)?href\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (attr, raw: string) => {
 			const value = raw.replace(/^["']|["']$/g, "").trim();
 			return /^(data:|#)/i.test(value) ? attr : "";
 		});
