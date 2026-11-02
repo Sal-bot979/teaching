@@ -56,7 +56,7 @@ The app-code diff against v0.4.1 is 8 files, +92 / −15.
 All of it defers to practice doctrine. Plus a study-folder boundary.
 
 **Passed:**
-- On v0.4.1: 3,268 / 3,269 tests. The one failure fails identically on unmodified v0.4.1 (environmental).
+- On v0.4.1: 3,276 / 3,277 tests. The one failure fails identically on unmodified v0.4.1 (environmental).
 - Lint, typecheck and build pass.
 - With the profile off, all three agents' prompts are byte-identical to upstream (apart from the two study-folder sentences). With it on, the profile reaches prober, teacher and practice through the real request path.
 - Every file-escape attempt is blocked.

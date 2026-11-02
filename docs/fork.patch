@@ -733,10 +733,10 @@ index 0000000..0ca46db
 \ No newline at end of file
 diff --git a/learnharness/hayden/evals/live-eval.ts b/learnharness/hayden/evals/live-eval.ts
 new file mode 100644
-index 0000000..958903e
+index 0000000..a3518b7
 --- /dev/null
 +++ b/learnharness/hayden/evals/live-eval.ts
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,327 @@
 +/**
 + * Synthetic-learner live eval — does a REAL model follow the profile?
 + *
@@ -749,14 +749,22 @@ index 0000000..958903e
 + *       Settings → Models strong slot names, through the app's own request
 + *       path, stopping at the dollar cap (priced turns) or the turn cap.
 + *
-+ * Honors LH_DATA_DIR — point it at a throwaway directory holding a COPY of
-+ * your settings.json (and prompts/ for the profile override) so the eval
-+ * sessions never mix with your real ones. The learner is a script: it is
-+ * consistent and cheap, not a person. Findings are screens (see
-+ * transcript-checks.ts), not verdicts.
++ * A live run REQUIRES LH_DATA_DIR pointing at a throwaway directory holding
++ * a COPY of your settings.json (and prompts/ for the profile override): the
++ * eval sessions never mix with your real ones, and graph extraction is
++ * switched off in that copy (it is not what is measured, and it spends).
++ * A dry run without LH_DATA_DIR uses a fresh temp directory.
++ *
++ * The cap counts every priced model call the sessions make — turns and
++ * background jobs (research, pdf, demo, visual) — and is checked BETWEEN
++ * learner turns, so one long turn can pass it. A model the app cannot price
++ * (subscription, custom) is reported as unpriced and only the turn cap
++ * applies: the run says so up front. The learner is a script: consistent
++ * and cheap, not a person. Findings are screens, not verdicts.
 + */
 +
 +import fs from "node:fs";
++import os from "node:os";
 +import path from "node:path";
 +import { fileURLToPath } from "node:url";
 +import type { AssistantMessage, FauxResponseStep } from "@earendil-works/pi-ai";
@@ -787,12 +795,17 @@ index 0000000..958903e
 +	interruption: "Normal session (~25 min). Goal: why minimizing cross-entropy for a binary classifier is maximum-likelihood estimation.",
 +	practice: "Practice: LQ fractionation and BED, new numbers please.",
 +};
++const WRONG_ATTEMPT = "I just divided total dose by fractions and compared: 60 > 45 so A, by 15.";
 +const MISCONCEPTION = "α/β is the tolerance dose of the tissue, so a high α/β tissue is the fragile one and suffers more from big fractions.";
 +
 +/** Numbers (2+ digits) in the solution that the statement never
 + *  mentions — derived results a hint must not hand over. */
 +export function revealedSolutionNumbers(statement: string, modelSolution: string, hint: string): string[] {
-+	const nums = (s: string) => new Set(s.match(/\d+(?:\.\d+)?/g)?.filter((n) => n.replace(".", "").length >= 2) ?? []);
++	// Numerically normalized (100.0 ≡ 100). Every number the solution
++	// contains but the statement does not counts — derived single digits
++	// ("2 Gy per fraction") included. A screen: a hint may legitimately
++	// mention such a number; read the flagged session before concluding.
++	const nums = (s: string) => new Set((s.match(/\d+(?:\.\d+)?/g) ?? []).map((n) => String(Number(n))));
 +	const given = nums(statement);
 +	const hintNums = nums(hint);
 +	return [...nums(modelSolution)].filter((n) => !given.has(n) && hintNums.has(n));
@@ -804,14 +817,30 @@ index 0000000..958903e
 +	return Array.isArray(c) ? (c as Array<{ type: string; text?: string }>).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n") : "";
 +};
 +
-+export async function runEval(opts: { dryRun: boolean; maxUsd: number; maxTurns: number; personas?: Persona[]; log?: (s: string) => void }): Promise<ScenarioResult[]> {
++export async function runEval(opts: { dryRun: boolean; confirmSpend?: boolean; maxUsd: number; maxTurns: number; personas?: Persona[]; log?: (s: string) => void }): Promise<ScenarioResult[]> {
 +	const log = opts.log ?? console.log;
++	// The spend gate lives HERE, not only in the CLI: no importer can run a
++	// live eval by accident.
++	if (!opts.dryRun && opts.confirmSpend !== true) throw new Error("runEval: a live run calls your configured model and may cost money — pass confirmSpend: true.");
++	if (!opts.dryRun && !process.env.LH_DATA_DIR) throw new Error("runEval: a live run needs LH_DATA_DIR pointing at a throwaway COPY of your data directory.");
++	if (!(opts.maxUsd >= 0) || !(opts.maxTurns >= 1)) throw new Error("runEval: maxUsd must be ≥ 0 and maxTurns ≥ 1.");
 +	const { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall } = await import("@earendil-works/pi-ai");
 +	const { handleChatRequest } = await import("../../src/server/chat-handler.ts");
 +	const { runningTurn } = await import("../../src/server/turn-runs.ts");
 +	const { isTurnRunning } = await import("../../src/server/turn-liveness.ts");
 +	const { chatStore } = await import("../../src/store/chats.ts");
-+	const { sessionCost } = await import("../../src/server/pricing.ts");
++	const { sessionCost, jobCost } = await import("../../src/server/pricing.ts");
++	const { jobStore } = await import("../../src/store/jobs.ts");
++	const { isSubscriptionModel } = await import("../../src/core/prices.ts");
++	const { readSettings, writeSettings } = await import("../../src/store/settings.ts");
++	if (!opts.dryRun) {
++		// Extraction is not what is measured, and it spends: off in the eval copy.
++		const current = readSettings() ?? { version: 1 };
++		writeSettings({ ...current, graph: { ...(current.graph ?? {}), enabled: false } });
++		const strong = current.models?.strong?.model;
++		if (!strong) throw new Error("runEval: no strong model configured in this data dir's settings.json (Settings → Models).");
++		log(`Live eval against ${strong.provider}:${strong.id} — cap $${opts.maxUsd}, ${opts.maxTurns} learner turns per persona.`);
++	}
 +	const { activeProblemOf, danglingQuestionOf } = await import("../../src/core/index.ts");
 +	const { toolQuestionKind } = await import("../../src/core/pending.ts");
 +	const { buildAnswer, normalizeOptions, normalizeQuizType, resolveCorrect } = await import("../../src/core/question-core.ts");
@@ -898,7 +927,20 @@ index 0000000..958903e
 +		const factory: Factory | undefined = engine
 +			? (o) => (persona === "practice" ? createPracticeAgent({ chatId, chatStore }, { ...o, engine }) : createTeacherAgent(undefined, { ...o, engine }))
 +			: undefined;
-+		const costNow = () => sessionCost(chatStore.getChat(chatId)!);
++		// Turns + background jobs; subscription and unpriced calls count as unpriced.
++		const costNow = () => {
++			const record = chatStore.getChat(chatId)!;
++			const turns = sessionCost(record);
++			let cost = turns.cost;
++			let unpriced = turns.unpriced + (turns.subscription ?? 0);
++			for (const job of jobStore.listJobs(chatId)) {
++				if (!job.usage) continue;
++				const dollars = isSubscriptionModel(job.usage.model) ? null : jobCost(job);
++				if (dollars === null) unpriced++;
++				else cost += dollars;
++			}
++			return { cost, unpriced };
++		};
 +		let learnerTurns = 0;
 +		let stoppedBy: ScenarioResult["stoppedBy"] = "script";
 +		let firstQuiz = true;
@@ -915,7 +957,13 @@ index 0000000..958903e
 +			if (next === undefined) break;
 +			if (learnerTurns >= opts.maxTurns && phase === "learning") { stoppedBy = "turn-cap"; break; }
 +			if (!opts.dryRun && spent + costNow().cost > opts.maxUsd) { stoppedBy = "budget"; break; }
-+			await send(chatId, next, factory);
++			try {
++				await send(chatId, next, factory);
++			} catch (err) {
++				log(`${persona}: ${err instanceof Error ? err.message : String(err)}`);
++				stoppedBy = "stuck";
++				break;
++			}
 +			learnerTurns++;
 +			const msgs = chatStore.getChat(chatId)!.messages;
 +
@@ -938,11 +986,15 @@ index 0000000..958903e
 +				const pose = problem.input as { statement?: string; modelSolution?: string };
 +				if (practiceAttempts === 0) {
 +					practiceAttempts++;
-+					script.push({ type: "thinking", problemCallId: problem.toolCallId, text: "I just divided total dose by fractions and compared: 60 > 45 so A, by 15." });
++					script.push({ type: "thinking", problemCallId: problem.toolCallId, text: WRONG_ATTEMPT });
 +				} else {
-+					// After a wrong attempt: did the reply hand over solution numbers?
-+					const reply = msgs.filter((m) => m.role === "assistant").slice(-1).map(textOf).join("\n");
-+					revealLeaks.push(...revealedSolutionNumbers(pose.statement ?? "", pose.modelSolution ?? "", reply));
++					// The reply to the wrong attempt is a hint (the problem is still
++					// active): did it hand over solution numbers the learner lacked?
++					if (practiceAttempts === 1) {
++						const turnReplies = msgs.slice(msgs.findLastIndex((m) => m.role === "custom") + 1).filter((m) => m.role === "assistant").map(textOf).join("\n");
++						revealLeaks.push(...revealedSolutionNumbers(`${pose.statement ?? ""}\n${WRONG_ATTEMPT}`, pose.modelSolution ?? "", turnReplies));
++					}
++					practiceAttempts++;
 +					script.push({ type: "thinking", problemCallId: problem.toolCallId, text: `Final answer: ${pose.modelSolution ?? "done"}` });
 +				}
 +			} else if (persona === "practice") {
@@ -954,6 +1006,7 @@ index 0000000..958903e
 +			}
 +		}
 +		if (script.length && stoppedBy === "script") stoppedBy = "stuck";
++		for (let i = 0; i < 600 && isTurnRunning(chatId); i++) await new Promise((r) => setTimeout(r, 100)); // let a wake turn settle before scoring
 +		// Dry runs price scripted tokens at the stamped model's rates — fiction.
 +		const priced = opts.dryRun ? { cost: 0, unpriced: 0 } : costNow();
 +		spent += priced.cost;
@@ -969,7 +1022,7 @@ index 0000000..958903e
 +	const lines = [`# Live eval — ${new Date().toISOString()} (${mode})`, "", "| Persona | Learner turns | Cost | Median words/turn | Resume point on stop | Findings | Practice reveal leaks | Stopped by |", "|---|---|---|---|---|---|---|---|"];
 +	for (const r of results) {
 +		const resume = r.report.resumePointRequired ? (r.report.resumePointPresent ? "present" : "**missing**") : "n/a";
-+		lines.push(`| ${r.persona} | ${r.learnerTurns} | $${r.costUsd.toFixed(4)}${r.unpricedTurns ? ` +${r.unpricedTurns} unpriced` : ""} | ${r.report.medianWords} | ${resume} | ${r.report.findings.map((f) => `${f.rule} (t${f.turn})`).join(", ") || "none"} | ${r.revealLeaks.join(", ") || "none"} | ${r.stoppedBy} |`);
++		lines.push(`| ${r.persona} | ${r.learnerTurns} | ${mode.startsWith("dry") ? "n/a" : `$${r.costUsd.toFixed(4)}${r.unpricedTurns ? ` + ${r.unpricedTurns} unpriced call(s)` : ""}`} | ${r.report.medianWords} | ${resume} | ${r.report.findings.map((f) => `${f.rule} (t${f.turn})`).join(", ") || "none"} | ${r.revealLeaks.join(", ") || "none"} | ${r.stoppedBy} |`);
 +	}
 +	lines.push("", "Findings are pattern screens: read the session (`check-session.ts <chatId>`) before trusting any of them. Session ids: " + results.map((r) => `${r.persona}=\`${r.chatId}\``).join(", ") + ".");
 +	return lines.join("\n") + "\n";
@@ -977,20 +1030,32 @@ index 0000000..958903e
 +
 +if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 +	const args = process.argv.slice(2);
-+	const flag = (name: string, fallback: number) => {
++	const flag = (name: string, fallback: number, min: number) => {
 +		const i = args.indexOf(name);
-+		const v = i >= 0 ? Number(args[i + 1]) : fallback;
-+		return Number.isFinite(v) && v > 0 ? v : fallback;
++		if (i < 0) return fallback;
++		const v = Number(args[i + 1]);
++		if (!Number.isFinite(v) || v < min) {
++			console.error(`Refusing: ${name} needs a number ≥ ${min} (got "${args[i + 1] ?? ""}").`);
++			process.exit(2);
++		}
++		return v;
 +	};
 +	const dryRun = args.includes("--dry-run");
 +	if (!dryRun && !args.includes("--confirm-spend")) {
 +		console.error("Refusing: a live eval calls your configured model and may cost money.\n  Free rehearsal:  npx tsx hayden/evals/live-eval.ts --dry-run\n  Real run:        npx tsx hayden/evals/live-eval.ts --confirm-spend [--max-usd 0.50] [--max-turns 8]");
 +		process.exit(2);
 +	}
-+	if (dryRun) process.env.OPENROUTER_API_KEY ??= "dry-run-key-presence-only";
-+	const maxUsd = flag("--max-usd", 0.5);
-+	const maxTurns = flag("--max-turns", 8);
-+	const results = await runEval({ dryRun, maxUsd, maxTurns });
++	if (!dryRun && !process.env.LH_DATA_DIR) {
++		console.error("Refusing: a live run needs LH_DATA_DIR pointing at a throwaway COPY of your data directory (settings.json, prompts/), so eval sessions never mix with yours.");
++		process.exit(2);
++	}
++	if (dryRun) {
++		process.env.LH_DATA_DIR ??= fs.mkdtempSync(path.join(os.tmpdir(), "lh-live-eval-dry-"));
++		process.env.OPENROUTER_API_KEY ??= "dry-run-key-presence-only";
++	}
++	const maxUsd = flag("--max-usd", 0.5, 0.01);
++	const maxTurns = flag("--max-turns", 8, 1);
++	const results = await runEval({ dryRun, confirmSpend: !dryRun, maxUsd, maxTurns });
 +	const report = renderReport(results, dryRun ? "dry run, scripted tutor" : `live, cap $${maxUsd}`);
 +	const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "live-results");
 +	fs.mkdirSync(dir, { recursive: true });
@@ -1559,10 +1624,32 @@ index ecdde38..0e079dc 100644
 -His files: find/ls/grep/read, home-anchored — the file doctrine. One addition is yours alone: for **PDFs**, dispatch a `pdf` job instead of `read` — a background reader (triage, targeted extraction, visual page reading) returns a **brief with page citations** as a new message, the same fire-and-forget discipline as research. Give it the path plus the specific question you need answered.
 +His files: find/ls/grep/read, anchored to his study folder — the file doctrine. One addition is yours alone: for **PDFs**, dispatch a `pdf` job instead of `read` — a background reader (triage, targeted extraction, visual page reading) returns a **brief with page citations** as a new message, the same fire-and-forget discipline as research. Give it the path plus the specific question you need answered.
 diff --git a/learnharness/src/agent/subagents/headless.ts b/learnharness/src/agent/subagents/headless.ts
-index 6277017..b492e1f 100644
+index 6277017..16279fc 100644
 --- a/learnharness/src/agent/subagents/headless.ts
 +++ b/learnharness/src/agent/subagents/headless.ts
-@@ -412,7 +412,24 @@ function crc32(buf: Buffer): number {
+@@ -299,9 +299,20 @@ async function runDemo(html: string, opts: RunDemoOptions = {}): Promise<DemoRun
+ 		});
+ 		page.on("pageerror", (err) => pageErrors.push(err instanceof Error ? err.message : String(err)));
+ 		page.on("requestfailed", (req) => failedRequests.push(`${req.url()} (${req.failure()?.errorText ?? "failed"})`));
++		// Study-folder boundary (Hayden fork): the demo loads from file://, so
++		// model HTML could pull local files (img/script/iframe src). Every
++		// file: request but the demo itself is refused the same way, so a
++		// failure reveals nothing about what exists; https CDNs still load.
++		const demoUrl = pathToFileURL(file).href;
++		await page.setRequestInterception(true);
++		page.on("request", (req) => {
++			if (req.isInterceptResolutionHandled()) return;
++			if (req.url().startsWith("file:") && req.url() !== demoUrl) void req.abort("accessdenied");
++			else void req.continue();
++		});
+ 
+ 		try {
+-			await page.goto(pathToFileURL(file).href, { waitUntil: "load", timeout: 30_000 });
++			await page.goto(demoUrl, { waitUntil: "load", timeout: 30_000 });
+ 			await new Promise((resolve) => setTimeout(resolve, settleMs));
+ 			if (opts.probe) {
+ 				try {
+@@ -412,7 +423,27 @@ function crc32(buf: Buffer): number {
  	return ~c >>> 0;
  }
  
@@ -1577,7 +1664,10 @@ index 6277017..b492e1f 100644
 +	return svg
 +		.replace(/<!DOCTYPE[^[>]*(\[[\s\S]*?\])?\s*>/gi, "")
 +		.replace(/<meta\b[^>]*>/gi, "")
-+		.replace(/(?:\s|(?<=["']))(?:[\w.-]+:)?href\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (attr, raw: string) => {
++		// Any attribute NAME ending in "href" — whatever its namespace prefix
++		// (xlink:, foo:, é:, …): a prefix-character allowlist was bypassed
++		// three times, so the name is matched by what it is not.
++		.replace(/(?:\s|(?<=["']))[^\s=<>"'/]*href\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (attr, raw: string) => {
 +			const value = raw.replace(/^["']|["']$/g, "").trim();
 +			return /^(data:|#)/i.test(value) ? attr : "";
 +		});
@@ -1588,7 +1678,7 @@ index 6277017..b492e1f 100644
  	// NATIVE FIRST (Wave E stage 2, owner 2026-10-10): resvg rasterizes
  	// static SVG in-process — visual-maker SVGs never execute script, so a
  	// browser adds nothing but a process. White background mirrors the old
-@@ -433,11 +450,13 @@ async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buff
+@@ -433,11 +464,13 @@ async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buff
  	} catch {
  		/* fall through to the browser path */
  	}
@@ -1629,7 +1719,7 @@ index 55651dc..938ee14 100644
  				engine: model,
  				abortSignal: loop.abortSignal,
 diff --git a/learnharness/src/agent/tools/fs-shared.ts b/learnharness/src/agent/tools/fs-shared.ts
-index 82a79be..3f54898 100644
+index 82a79be..b12c9b7 100644
 --- a/learnharness/src/agent/tools/fs-shared.ts
 +++ b/learnharness/src/agent/tools/fs-shared.ts
 @@ -1,6 +1,8 @@
@@ -1650,7 +1740,7 @@ index 82a79be..3f54898 100644
   *
   * Ported behaviors (mirroring pi's dist/core/tools/{ls,find,grep}.js): the
   * schemas, descriptions, output formats, and truncation notices are copied
-@@ -35,15 +39,43 @@ export const WALK_TIMEOUT_MS = 10_000;
+@@ -35,15 +39,45 @@ export const WALK_TIMEOUT_MS = 10_000;
   */
  const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]);
  
@@ -1676,7 +1766,9 @@ index 82a79be..3f54898 100644
 -	if (p === "~" || p.startsWith("~/") || p.startsWith(`~${path.sep}`)) return path.join(os.homedir(), p.slice(1));
 -	return path.isAbsolute(p) ? p : path.join(os.homedir(), p);
 +	const root = studyRoot();
-+	const resolved = !p ? root : path.resolve(root, p.startsWith("~") ? p.replace(/^~(?=$|\/)/, os.homedir()) : p);
++	// Upstream's tilde rule: a leading ~, ~/ or ~<sep> is home; ~user is literal.
++	const expanded = p === "~" || p?.startsWith("~/") || p?.startsWith(`~${path.sep}`) ? path.join(os.homedir(), p.slice(1)) : p;
++	const resolved = !expanded ? root : path.resolve(root, expanded);
 +	let realRoot = root;
 +	try {
 +		realRoot = fsSync.realpathSync(root);
@@ -1752,7 +1844,7 @@ index d4b259c..83ad414 100644
  const { piEngineForSpec, piModels } = await import("../src/agent/models.ts");
  await import("../src/server/keys.ts");
 diff --git a/learnharness/tests/fs-tools.test.ts b/learnharness/tests/fs-tools.test.ts
-index 2ee0a60..5a176aa 100644
+index 2ee0a60..990ed0e 100644
 --- a/learnharness/tests/fs-tools.test.ts
 +++ b/learnharness/tests/fs-tools.test.ts
 @@ -1,4 +1,5 @@
@@ -1772,12 +1864,12 @@ index 2ee0a60..5a176aa 100644
  let FIXTURE: string;
  
  /** Drive one tool's native execute and return the model-facing text
-@@ -86,36 +91,58 @@ describe("glob helpers (fs-shared)", () => {
+@@ -86,36 +91,59 @@ describe("glob helpers (fs-shared)", () => {
  	});
  });
  
-+// Hayden fork: upstream's tilde semantics are kept (a leading ~ or ~/ is
-+// the home directory, ~user and inner tildes are literal) — and every
++// Hayden fork: upstream's tilde semantics are kept (a leading ~, ~/ or ~<sep>
++// is the home directory, ~user and inner tildes are literal) — and every
 +// result is then held to the study folder. A synthetic home holds it.
  describe("resolveSourcePath (fs-shared)", () => {
 -	it("a leading ~ is the learner's home, as a shell expands it", () => {
@@ -1827,16 +1919,16 @@ index 2ee0a60..5a176aa 100644
 +		});
  	});
  
--	it("backslash is a home separator only on Windows", () => {
+ 	it("backslash is a home separator only on Windows", () => {
 -		const input = "~\\notes\\calculus.md";
 -		const expected = process.platform === "win32"
 -			? path.join(os.homedir(), "notes", "calculus.md")
 -			: path.join(os.homedir(), input);
 -		assert.equal(resolveSourcePath(input), expected);
-+	it("backslash is literal on POSIX (stays inside the study folder)", () => {
 +		withStudyHome((_home, study) => {
-+			if (process.platform === "win32") return;
-+			assert.equal(resolveSourcePath("~\\notes\\calculus.md"), path.join(study, "~\\notes\\calculus.md"));
++			const input = "~\\Study\\calculus.md";
++			const expected = process.platform === "win32" ? path.join(study, "calculus.md") : path.join(study, input);
++			assert.equal(resolveSourcePath(input), expected);
 +		});
  	});
  
@@ -1853,7 +1945,7 @@ index 2ee0a60..5a176aa 100644
  	});
  });
  
-@@ -165,7 +192,7 @@ describe("ls (pi port)", () => {
+@@ -165,7 +193,7 @@ describe("ls (pi port)", () => {
  	});
  
  	it("missing path and non-directory throw (the model sees the error)", async () => {
@@ -1864,10 +1956,10 @@ index 2ee0a60..5a176aa 100644
  			/Not a directory/,
 diff --git a/learnharness/tests/hayden-live-eval.test.ts b/learnharness/tests/hayden-live-eval.test.ts
 new file mode 100644
-index 0000000..f045b80
+index 0000000..17d27fa
 --- /dev/null
 +++ b/learnharness/tests/hayden-live-eval.test.ts
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,142 @@
 +/**
 + * Hayden fork — the synthetic-learner live eval (hayden/evals/live-eval.ts),
 + * exercised in its free dry-run mode: a scripted tutor stands in for the
@@ -1885,8 +1977,19 @@ index 0000000..f045b80
 +
 +const TMP_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "lh-hayden-live-eval-"));
 +process.env.LH_DATA_DIR = TMP_DATA;
++process.env.LH_AUTH_FILE = path.join(TMP_DATA, "auth.json");
 +process.env.OPENROUTER_API_KEY ??= "test-key-presence-gate";
-+after(() => fs.rmSync(TMP_DATA, { recursive: true, force: true }));
++// "Free" is proven, not assumed: any network call fails the run and is counted.
++let fetchCalls = 0;
++const originalFetch = globalThis.fetch;
++globalThis.fetch = async (input: unknown) => {
++	fetchCalls++;
++	throw new Error(`unexpected network call: ${String(input)}`);
++};
++after(() => {
++	globalThis.fetch = originalFetch;
++	fs.rmSync(TMP_DATA, { recursive: true, force: true });
++});
 +
 +const { runEval, renderReport, revealedSolutionNumbers } = await import("../hayden/evals/live-eval.ts");
 +const { chatStore } = await import("../src/store/chats.ts");
@@ -1900,7 +2003,8 @@ index 0000000..f045b80
 +	const results = await runEval({ dryRun: true, maxUsd: 0.5, maxTurns: 6, log: () => {} });
 +	const by = Object.fromEntries(results.map((r) => [r.persona, r]));
 +
-+	it("runs all four personas to their scripted stop, free", () => {
++	it("runs all four personas to their scripted stop, with zero network calls", () => {
++		assert.equal(fetchCalls, 0, "a dry run must never reach the network");
 +		assert.deepEqual(results.map((r) => r.persona), ["correct", "misconception", "interruption", "practice"]);
 +		for (const r of results) {
 +			assert.equal(r.stoppedBy, "script", r.persona);
@@ -1951,6 +2055,23 @@ index 0000000..f045b80
 +		assert.deepEqual(revealedSolutionNumbers(statement, solution, "Re-read: 60 Gy over 30 fractions — what is d?"), []);
 +		assert.deepEqual(revealedSolutionNumbers(statement, solution, "Check the dose per fraction first."), []);
 +	});
++	it("catches derived single digits and reformatted values (critic round 4)", () => {
++		// d = 2 Gy is derived, not given; "100.0" is the same number as "100".
++		assert.deepEqual(revealedSolutionNumbers(statement, "d = 2 Gy; BED_A = 100 Gy_3", "Hint: you need d = 2 here."), ["2"]);
++		assert.deepEqual(revealedSolutionNumbers(statement, solution, "That works out to 100.0 Gy_3."), ["100"]);
++	});
++});
++
++describe("live eval — runEval never spends by accident", () => {
++	it("a live run without confirmSpend throws before anything happens", async () => {
++		const before = chatStore.listChats().length;
++		await assert.rejects(() => runEval({ dryRun: false, maxUsd: 0.5, maxTurns: 2, log: () => {} }), /confirmSpend: true/);
++		assert.equal(chatStore.listChats().length, before, "no session was created");
++	});
++	it("invalid caps are refused", async () => {
++		await assert.rejects(() => runEval({ dryRun: true, maxUsd: -1, maxTurns: 2, log: () => {} }), /maxUsd must be/);
++		await assert.rejects(() => runEval({ dryRun: true, maxUsd: 0.5, maxTurns: 0, log: () => {} }), /maxTurns/);
++	});
 +});
 +
 +describe("live eval — CLI never spends by accident", () => {
@@ -1962,6 +2083,23 @@ index 0000000..f045b80
 +		});
 +		assert.equal(r.status, 2, r.stderr);
 +		assert.match(r.stderr, /Refusing: a live eval calls your configured model and may cost money/);
++	});
++
++	const cli = (args: string[], env: Record<string, string | undefined>) =>
++		spawnSync(process.execPath, ["--import", "tsx", path.join(import.meta.dirname, "..", "hayden", "evals", "live-eval.ts"), ...args], { env: { ...process.env, ...env }, encoding: "utf-8", timeout: 60_000 });
++
++	it("refuses a live run without a throwaway LH_DATA_DIR", () => {
++		const r = cli(["--confirm-spend"], { LH_DATA_DIR: undefined });
++		assert.equal(r.status, 2, r.stderr);
++		assert.match(r.stderr, /needs LH_DATA_DIR/);
++	});
++
++	it("refuses a cap it cannot honor (0, negative, non-numeric) instead of defaulting", () => {
++		for (const bad of ["0", "-1", "abc"]) {
++			const r = cli(["--dry-run", "--max-usd", bad], { LH_DATA_DIR: TMP_DATA });
++			assert.equal(r.status, 2, `--max-usd ${bad}: ${r.stderr}`);
++			assert.match(r.stderr, /--max-usd needs a number/);
++		}
 +	});
 +});
 diff --git a/learnharness/tests/hayden-profile.test.ts b/learnharness/tests/hayden-profile.test.ts
@@ -2388,10 +2526,10 @@ index 0000000..c6c6454
 +});
 diff --git a/learnharness/tests/hayden-study-boundary.test.ts b/learnharness/tests/hayden-study-boundary.test.ts
 new file mode 100644
-index 0000000..e09f73f
+index 0000000..de0c5a0
 --- /dev/null
 +++ b/learnharness/tests/hayden-study-boundary.test.ts
-@@ -0,0 +1,170 @@
+@@ -0,0 +1,221 @@
 +/**
 + * Hayden fork — the study-folder boundary (fs-shared studyRoot /
 + * resolveSourcePath). Learner-file tools (read, ls, find, grep) and the
@@ -2560,6 +2698,57 @@ index 0000000..e09f73f
 +		const { stripExternalRefs } = await import("../src/agent/subagents/headless.ts");
 +		assert.doesNotMatch(stripExternalRefs('<svg><image x="0"href="/etc/secret.png"/></svg>'), /secret/);
 +		assert.doesNotMatch(stripExternalRefs("<svg><image x='0'xlink:href='/etc/secret.png'/></svg>"), /secret/);
++	});
++});
++
++describe("study-folder boundary — critic round 4 (non-ASCII namespace prefix)", () => {
++	it("an href under any namespace prefix, Unicode included, is stripped and nothing is read", async () => {
++		const { stripExternalRefs, getHeadless } = await import("../src/agent/subagents/headless.ts");
++		const red = path.join(OUTSIDE, "red4.png");
++		fs.writeFileSync(red, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64"));
++		for (const prefix of ["é", "ñs", "名前", "x-y.z"]) {
++			const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:${prefix}="http://www.w3.org/1999/xlink" width="20" height="20"><image ${prefix}:href="${red}" width="20" height="20"/></svg>`;
++			assert.doesNotMatch(stripExternalRefs(svg), /red4\.png/, prefix);
++			const png = await getHeadless().renderSvg(svg);
++			const { Resvg } = await import("@resvg/resvg-js");
++			const probe = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="data:image/png;base64,${png.toString("base64")}" width="20" height="20"/></svg>`);
++			assert.deepEqual([...probe.render().pixels.subarray(0, 3)], [255, 255, 255], `leaked via ${prefix}:href`);
++		}
++	});
++});
++
++// Real-browser checks: they run where a Chrome/Chromium is available
++// (CHROME_PATH, or the Playwright Chromium in cloud sandboxes) and skip
++// otherwise. Both reproduce local-file reads on unmodified upstream 0.4.1.
++const CHROME = [process.env.CHROME_PATH, "/opt/pw-browsers/chromium-1243/chrome-linux64/chrome"].find((p) => p && fs.existsSync(p));
++describe("study-folder boundary — real browser (demo page, SVG fallback)", { skip: CHROME ? false : "no Chrome available" }, () => {
++	const secret = () => {
++		const f = path.join(OUTSIDE, "browser-secret.png");
++		fs.writeFileSync(f, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64"));
++		return f;
++	};
++
++	it("a demo page cannot load a local file (every file: request but the demo is refused alike)", async () => {
++		process.env.CHROME_PATH = CHROME;
++		const { getHeadless } = await import("../src/agent/subagents/headless.ts");
++		const f = secret();
++		const html = `<!doctype html><html><body><img src="file://${f}" onload="window.R='LOADED'" onerror="window.R='BLOCKED'"><img src="file://${f}.missing" onerror="window.M='BLOCKED'"></body></html>`;
++		const r = await getHeadless().runDemo(html, { settleMs: 800, probe: "[window.R, window.M]" });
++		assert.deepEqual(r.probeResult, ["BLOCKED", "BLOCKED"]);
++		assert.ok(r.failedRequests.every((x) => x.includes("ERR_ACCESS_DENIED")), "existing and missing files fail identically (no existence oracle)");
++	});
++
++	it("the SVG browser fallback cannot load a local file through <foreignObject><img src>", async () => {
++		process.env.CHROME_PATH = CHROME;
++		const { getHeadless } = await import("../src/agent/subagents/headless.ts");
++		const { Resvg } = await import("@resvg/resvg-js");
++		const f = secret();
++		// No xmlns: resvg rejects it, so the browser fallback renders it.
++		const png = await getHeadless().renderSvg(`<svg width="40" height="40"><foreignObject width="40" height="40"><img src="file://${f}" width="40" height="40"/></foreignObject></svg>`);
++		const probe = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><image href="data:image/png;base64,${png.toString("base64")}" width="40" height="40"/></svg>`);
++		const px = probe.render().pixels;
++		const centre = 4 * (40 * 20 + 20);
++		assert.deepEqual([...px.subarray(centre, centre + 3)], [255, 255, 255]);
 +	});
 +});
 diff --git a/learnharness/tests/hayden-transcript-checks.test.ts b/learnharness/tests/hayden-transcript-checks.test.ts

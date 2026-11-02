@@ -6,12 +6,12 @@ All runs were in this cloud container (Node 22) with deterministic fixtures. **N
 
 | Check | Upstream v0.4.1 (unmodified) | **Fork on v0.4.1** |
 |---|---|---|
-| `npm test` | 3,186 / 3,187 pass | **3,268 / 3,269 pass** |
+| `npm test` | 3,186 / 3,187 pass | **3,276 / 3,277 pass** |
 | `npm run lint` | pass (1 upstream warning) | **pass** (the same upstream warning, in `tests/source-name-ui.test.tsx`) |
 | `npm run typecheck` | pass | **pass** |
 | `npm run build` | pass | **pass** |
 
-Both runs fail exactly one test, the same one: `subscription-auth` "main loader resolves Pi's import-only PUBLIC package exports…" (`ERR_PACKAGE_PATH_NOT_EXPORTED` from `@earendil-works/pi-ai` in this environment). The fork adds 82 tests. Upstream 0.4.1 composes **byte-identical** agent prompts to 0.3.7, so the goldens, and every profile on/off guarantee below, carried over unchanged.
+Both runs fail exactly one test, the same one: `subscription-auth` "main loader resolves Pi's import-only PUBLIC package exports…" (`ERR_PACKAGE_PATH_NOT_EXPORTED` from `@earendil-works/pi-ai` in this environment). The fork adds 90 tests. Upstream 0.4.1 composes **byte-identical** agent prompts to 0.3.7, so the goldens, and every profile on/off guarantee below, carried over unchanged.
 
 Merging 0.4.1 surfaced one behavior change, and it's in the fork's favor: upstream's PDF reader now resolves paths itself, so the study-folder boundary also holds *inside* the reader, not only at the job runner. Seven upstream test files read fixtures outside any study folder and were given a study root ([changes](02-changes.md)).
 
@@ -35,7 +35,7 @@ Merging 0.4.1 surfaced one behavior change, and it's in the fork's favor: upstre
 
 The frozen v0.3.7 candidate had one real regression: `prompt-overrides` pinned the exact segment list, and the new empty profile segment is now on it. That pin was updated on purpose.
 
-## What the new tests prove (82 tests)
+## What the new tests prove (90 tests)
 
 | Claim | Evidence | Test |
 |---|---|---|
