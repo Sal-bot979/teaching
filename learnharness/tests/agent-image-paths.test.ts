@@ -33,6 +33,8 @@ process.env = {
 	NODE_ENV: "test",
 	HOME: path.join(scratch, "home"),
 	LH_DATA_DIR: path.join(scratch, "data"),
+	// Hayden fork: learner-file tools are confined to the study folder.
+	LH_STUDY_DIR: scratch,
 	LH_AUTH_FILE: path.join(scratch, "auth.json"),
 };
 globalThis.fetch = async () => { throw new Error("CLOSED: unexpected network request"); };
@@ -47,7 +49,9 @@ const { createTeacherAgent, createProberAgent, createPracticeAgent } = await imp
 const { runPdfReaderAgent } = await import("../src/agent/subagents/pdf-reader.ts");
 const { runVisualMaker } = await import("../src/agent/subagents/visual-maker.ts");
 
-const PDF = path.join(import.meta.dirname, "fixtures", "sample-3page.pdf");
+// Hayden fork: the learner PDF must sit in the study folder (scratch).
+const PDF = path.join(scratch, "sample-3page.pdf");
+fs.copyFileSync(path.join(import.meta.dirname, "fixtures", "sample-3page.pdf"), PDF);
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="4800" height="120" viewBox="0 0 4800 120"><rect width="4800" height="120" fill="white"/></svg>';
 const CUSTOM_RESIZE = { maxWidth: 320, maxHeight: 200 };
 

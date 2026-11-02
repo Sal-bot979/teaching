@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -90,36 +91,58 @@ describe("glob helpers (fs-shared)", () => {
 	});
 });
 
+// Hayden fork: upstream's tilde semantics are kept (a leading ~ or ~/ is
+// the home directory, ~user and inner tildes are literal) — and every
+// result is then held to the study folder. A synthetic home holds it.
 describe("resolveSourcePath (fs-shared)", () => {
-	it("a leading ~ is the learner's home, as a shell expands it", () => {
-		const home = os.homedir();
-		assert.equal(resolveSourcePath("~"), home);
-		assert.equal(resolveSourcePath("~/notes/calculus.md"), path.join(home, "notes", "calculus.md"));
-		assert.equal(resolveSourcePath(`~${path.sep}notes${path.sep}calculus.md`), path.join(home, "notes", "calculus.md"));
+	const withStudyHome = (fn: (home: string, study: string) => void) => {
+		const home = fsSync.mkdtempSync(path.join(os.tmpdir(), "lh-home-"));
+		const study = path.join(home, "Study");
+		fsSync.mkdirSync(study);
+		const saved = { HOME: process.env.HOME, LH_STUDY_DIR: process.env.LH_STUDY_DIR };
+		process.env.HOME = home;
+		process.env.LH_STUDY_DIR = study;
+		try {
+			fn(home, study);
+		} finally {
+			process.env.HOME = saved.HOME;
+			process.env.LH_STUDY_DIR = saved.LH_STUDY_DIR;
+			fsSync.rmSync(home, { recursive: true, force: true });
+		}
+	};
+
+	it("a leading ~ is the learner's home, as a shell expands it — inside the study folder only", () => {
+		withStudyHome((home, study) => {
+			assert.equal(resolveSourcePath("~/Study/notes/calculus.md"), path.join(study, "notes", "calculus.md"));
+			assert.throws(() => resolveSourcePath("~"), /Outside the study folder/);
+			assert.throws(() => resolveSourcePath("~/notes/calculus.md"), /Outside the study folder/);
+			assert.equal(path.dirname(study), home);
+		});
 	});
 
-	it("preserves default, ordinary relative, and absolute paths", () => {
-		const home = os.homedir();
-		const absolute = path.join(os.tmpdir(), "course", "notes.md");
-		assert.equal(resolveSourcePath(), home);
-		assert.equal(resolveSourcePath(""), home);
-		assert.equal(resolveSourcePath("notes/calculus.md"), path.join(home, "notes", "calculus.md"));
-		assert.equal(resolveSourcePath(absolute), absolute);
+	it("default and relative paths resolve inside the study folder; absolute paths only when inside it", () => {
+		withStudyHome((_home, study) => {
+			assert.equal(resolveSourcePath(), study);
+			assert.equal(resolveSourcePath(""), study);
+			assert.equal(resolveSourcePath("notes/calculus.md"), path.join(study, "notes", "calculus.md"));
+			assert.equal(resolveSourcePath(path.join(study, "notes.md")), path.join(study, "notes.md"));
+			assert.throws(() => resolveSourcePath(path.join(os.tmpdir(), "course", "notes.md")), /Outside the study folder/);
+		});
 	});
 
-	it("backslash is a home separator only on Windows", () => {
-		const input = "~\\notes\\calculus.md";
-		const expected = process.platform === "win32"
-			? path.join(os.homedir(), "notes", "calculus.md")
-			: path.join(os.homedir(), input);
-		assert.equal(resolveSourcePath(input), expected);
+	it("backslash is literal on POSIX (stays inside the study folder)", () => {
+		withStudyHome((_home, study) => {
+			if (process.platform === "win32") return;
+			assert.equal(resolveSourcePath("~\\notes\\calculus.md"), path.join(study, "~\\notes\\calculus.md"));
+		});
 	});
 
 	it("~user and non-leading tildes stay literal", () => {
-		const home = os.homedir();
-		assert.equal(resolveSourcePath("~other/notes.md"), path.join(home, "~other", "notes.md"));
-		assert.equal(resolveSourcePath("notes/~draft.md"), path.join(home, "notes", "~draft.md"));
-		assert.equal(resolveSourcePath("/tmp/~/x.md"), "/tmp/~/x.md");
+		withStudyHome((_home, study) => {
+			assert.equal(resolveSourcePath("~other/notes.md"), path.join(study, "~other", "notes.md"));
+			assert.equal(resolveSourcePath("notes/~draft.md"), path.join(study, "notes", "~draft.md"));
+			assert.throws(() => resolveSourcePath("/tmp/~/x.md"), /Outside the study folder/);
+		});
 	});
 });
 

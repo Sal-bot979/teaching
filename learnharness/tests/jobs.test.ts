@@ -737,6 +737,7 @@ describe("pdf runner (sources v0)", () => {
 	let home: string;
 	const originalHome = process.env.HOME;
 	const originalUserProfile = process.env.USERPROFILE;
+	const originalStudy = process.env.LH_STUDY_DIR; // Hayden fork: the synthetic home is the study folder here
 
 	before(() => {
 		home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-pdf-job-home-"));
@@ -745,6 +746,7 @@ describe("pdf runner (sources v0)", () => {
 		fs.copyFileSync(PDF_FIXTURE, target);
 		process.env.HOME = home;
 		process.env.USERPROFILE = home;
+		process.env.LH_STUDY_DIR = home;
 	});
 
 	after(() => {
@@ -752,6 +754,8 @@ describe("pdf runner (sources v0)", () => {
 		else process.env.HOME = originalHome;
 		if (originalUserProfile === undefined) delete process.env.USERPROFILE;
 		else process.env.USERPROFILE = originalUserProfile;
+		if (originalStudy === undefined) delete process.env.LH_STUDY_DIR;
+		else process.env.LH_STUDY_DIR = originalStudy;
 		fs.rmSync(home, { recursive: true, force: true });
 	});
 
@@ -764,7 +768,11 @@ describe("pdf runner (sources v0)", () => {
 		]);
 	}
 
-	it("runJob completes a pdf job: brief + pagesConsulted land on the record, citation steer delivered", async () => {
+	it("runJob completes a pdf job: brief + pagesConsulted land on the record, citation steer delivered", async (t) => {
+		// Hayden fork: this one reads the repo fixture, so its folder is the study root.
+		const suiteStudy = process.env.LH_STUDY_DIR;
+		process.env.LH_STUDY_DIR = path.dirname(PDF_FIXTURE);
+		t.after(() => { process.env.LH_STUDY_DIR = suiteStudy; });
 		const chat = chatStore.createChat("Test: pdf runner");
 		trackChat(chat.id);
 		chatStore.saveMessages(chat.id, nativeToolMessages("read this pdf", "pdf", "call-pdf1", PDF_INPUT));

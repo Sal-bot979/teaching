@@ -2,7 +2,7 @@
 
 **Destination:** a personal fork of LearnHarness that keeps about 95% of upstream untouched and adds a small, opt-in personalization for one advanced learner. It ships with deterministic proof that the personalization reaches every learning agent and that switching it off restores upstream.
 
-**Source of truth:** upstream repo [`amosblomqvist/learnharness`](https://github.com/amosblomqvist/learnharness) at `b277ee3e0fa24249c1b2d0f9b7fd6ed485f484b9` (v0.3.7, AGPL-3.0-only), imported verbatim in commit `0a60044`. Behavior was read from the current code and tests, not the docs. The reference video ([youtu.be/nfTDljFG2g0](https://youtu.be/nfTDljFG2g0)) **could not be accessed**: YouTube is blocked by this environment's network proxy and no transcript was found. Nothing here claims to reflect its content; the build rests on the repository alone.
+**Source of truth:** upstream repo [`amosblomqvist/learnharness`](https://github.com/amosblomqvist/learnharness), AGPL-3.0-only. The fork was built on `b277ee3e0fa24249c1b2d0f9b7fd6ed485f484b9` (v0.3.7, imported verbatim in `0a60044`), then rebased by a 3-way merge onto **`e69e852` (v0.4.1, 190 commits later, imported verbatim in `2270bd7`, merged in `a301f4f`)**. Upstream 0.4.1 composes byte-identical agent prompts to 0.3.7. Behavior was read from the current code and tests, not the docs. The reference video ([youtu.be/nfTDljFG2g0](https://youtu.be/nfTDljFG2g0)) **could not be accessed**: YouTube is blocked by this environment's network proxy and no transcript was found. Nothing here claims to reflect its content; the build rests on the repository alone.
 
 **Scope:**
 - **In:**

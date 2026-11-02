@@ -2,6 +2,17 @@
 
 The deterministic suite proves the profile reaches every agent and that upstream behavior is otherwise unchanged. It can't show the profile improves learning; only your delayed performance can. This protocol measures that with the least effort that still gives an honest answer.
 
+## Before you start: check the model follows the profile
+
+Run the synthetic-learner eval once per model you plan to use. It scripts four learners (correct, confidently wrong, interrupted, and practice with a wrong first attempt) through the real app and scores the transcripts:
+
+```bash
+npx tsx hayden/evals/live-eval.ts --dry-run                                  # free rehearsal
+LH_DATA_DIR=/tmp/lh-eval npx tsx hayden/evals/live-eval.ts --confirm-spend --max-usd 0.50
+```
+
+Copy your `settings.json` and `prompts/` into the throwaway `LH_DATA_DIR` first, so eval sessions stay out of your real history. It stops at the dollar cap (priced models) or the turn cap. Read the report's flagged sessions before trusting a finding: these are pattern screens.
+
 ## Design (one pair at a time)
 
 1. **Pick two comparable concepts** of similar difficulty that you don't yet hold. The three templates work, and so does anything you write held-out items for *before* the session.

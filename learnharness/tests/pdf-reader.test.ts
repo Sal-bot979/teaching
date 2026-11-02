@@ -15,6 +15,8 @@ import { runPdfReaderAgent } from "../src/agent/subagents/pdf-reader.ts";
 import type { HeadlessApi } from "../src/agent/subagents/headless.ts";
 
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "sample-3page.pdf");
+// Hayden fork: learner PDFs are confined to the study folder.
+process.env.LH_STUDY_DIR = path.dirname(FIXTURE);
 
 function fauxEngine(steps: FauxResponseStep[]): PiEngine {
 	const faux = createFauxCore({ tokenSize: { min: 64, max: 64 } });
@@ -58,6 +60,7 @@ describe("pdf-reader source paths", () => {
 	const relativePath = path.join("Course notes", "sample document.pdf");
 	const originalHome = process.env.HOME;
 	const originalUserProfile = process.env.USERPROFILE;
+	const originalStudy = process.env.LH_STUDY_DIR; // Hayden fork: the synthetic home is the study folder here
 
 	before(() => {
 		home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-pdf-home-"));
@@ -66,6 +69,7 @@ describe("pdf-reader source paths", () => {
 		fs.copyFileSync(FIXTURE, target);
 		process.env.HOME = home;
 		process.env.USERPROFILE = home;
+		process.env.LH_STUDY_DIR = home;
 	});
 
 	after(() => {
@@ -73,6 +77,8 @@ describe("pdf-reader source paths", () => {
 		else process.env.HOME = originalHome;
 		if (originalUserProfile === undefined) delete process.env.USERPROFILE;
 		else process.env.USERPROFILE = originalUserProfile;
+		if (originalStudy === undefined) delete process.env.LH_STUDY_DIR;
+		else process.env.LH_STUDY_DIR = originalStudy;
 		fs.rmSync(home, { recursive: true, force: true });
 	});
 

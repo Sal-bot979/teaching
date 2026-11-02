@@ -23,6 +23,11 @@ Upstream app code changed: **8 files, +75 / −12 lines**. The other ~1,800 line
 | `tests/read-tool.test.ts` | Scratch dir = study root. The "relative paths resolve against home" test now asserts "against the study folder". |
 | `tests/jobs.test.ts` | PDF fixtures dir = study root. The doctrine assertion now looks for "study folder" instead of "home directory". **+1 test:** a PDF outside the folder fails the job before anything is read. |
 | `tests/prompt-overrides.test.ts` | The pinned prober segment list gains `shared/90-learner-profile.md`. |
+| `tests/fs-tools.test.ts` (0.4.1's `resolveSourcePath` suite) | Upstream 0.4.1 added tests pinning home-directory semantics. They're restated for the fork: tilde expansion is unchanged (leading `~`/`~/` is home, `~user` and inner tildes are literal), and every result is then held to the study folder, shown with a synthetic home that has `Study/` inside it. |
+| `tests/pdf-reader.test.ts`, `tests/jobs.test.ts` (0.4.1 source-path suites) | The suite's synthetic home is also the study root (saved and restored); the test reading the repo fixture scopes the study root to `tests/fixtures`. |
+| `tests/agent-image-paths.test.ts`, `custom-provider-lifecycle`, `background-capture`, `provider-neutral-agents` (new in 0.4.1) | Each rebuilds `process.env`; the study root is added to it (scratch dir or `tests/fixtures`). `agent-image-paths` copies its PDF fixture into the scratch study folder, as a learner would. |
+
+**Why so many upstream tests needed a study root after 0.4.1:** upstream's PDF reader now calls `resolveSourcePath` itself (for `~` support). With the fork, that means the boundary is enforced inside the reader too, not just at the job runner. That's stronger, so it stays.
 
 ## New files
 
@@ -35,7 +40,8 @@ Upstream app code changed: **8 files, +75 / −12 lines**. The other ~1,800 line
 | `hayden/evals/retention-protocol.md`, `results.csv` | A 7-day n-of-1 on/off comparison you run yourself. |
 | `hayden/evals/seed-demo.ts` | Writes scripted demo sessions into a throwaway data dir, for the screenshots. |
 | `hayden/evals/golden/upstream-*.txt` | Upstream's own composed prompts, captured from the pristine checkout. |
-| `tests/hayden-*.test.ts` | 4 new test files, 73 tests, plus 1 in `jobs.test.ts` ([results](03-results.md)). |
+| `hayden/evals/live-eval.ts` | Synthetic-learner live eval: four scripted learners (correct, confidently wrong, interrupted, practice with a wrong first attempt) run through the app's real request path against your configured model, with a dollar cap and a turn cap, plus a free `--dry-run`. Refuses to spend without `--confirm-spend`. Adds a practice reveal screen: a hint after a wrong attempt that contains numbers found only in the committed solution. |
+| `tests/hayden-*.test.ts` | 5 new test files ([results](03-results.md)). |
 
 ## Profile clauses and their evidence
 

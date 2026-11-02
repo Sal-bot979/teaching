@@ -19,6 +19,7 @@ process.env = {
 	...(originalEnv.NODE_OPTIONS ? { NODE_OPTIONS: originalEnv.NODE_OPTIONS } : {}),
 	NODE_ENV: "test", HOME: path.join(scratch, "home"),
 	LH_DATA_DIR: path.join(scratch, "data"), LH_AUTH_FILE: path.join(scratch, "auth.json"),
+	LH_STUDY_DIR: path.join(import.meta.dirname, "fixtures"), // Hayden fork: study-folder boundary
 };
 globalThis.fetch = async () => { throw new Error("CLOSED: unexpected external request"); };
 after(() => {

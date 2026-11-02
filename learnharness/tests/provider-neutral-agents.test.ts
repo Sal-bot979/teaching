@@ -55,7 +55,7 @@ async function isolated<T>(env: Record<string, string>, run: () => Promise<T>): 
 	const eventsDir = mkdtempSync(path.join(tmpdir(), "lh-provider-neutral-"));
 	providerEventsDir.current = eventsDir;
 	globalThis.fetch = async () => { throw new Error("CLOSED: unexpected fetch"); };
-	process.env = { NODE_ENV: "test", HOME: "/nonexistent/provider-neutral-test-home", ...env };
+	process.env = { NODE_ENV: "test", HOME: "/nonexistent/provider-neutral-test-home", LH_STUDY_DIR: path.join(import.meta.dirname, "fixtures") /* Hayden fork: study-folder boundary */, ...env };
 	try {
 		return await run();
 	} finally {
