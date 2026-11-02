@@ -2,29 +2,40 @@
 
 All runs were in this cloud container (Node 22) with deterministic fixtures. **No model was called and nothing was spent.**
 
-## Upstream baseline vs fork
+## Current: fork on upstream v0.4.1 (`e69e852`)
 
-| Check | Upstream `b277ee3` (unmodified) | Fork, frozen candidate | After round 1 | After round 2 | **Final (after round 3)** |
+| Check | Upstream v0.4.1 (unmodified) | **Fork on v0.4.1** |
+|---|---|---|
+| `npm test` | 3,186 / 3,187 pass | **3,268 / 3,269 pass** |
+| `npm run lint` | pass (1 upstream warning) | **pass** (the same upstream warning, in `tests/source-name-ui.test.tsx`) |
+| `npm run typecheck` | pass | **pass** |
+| `npm run build` | pass | **pass** |
+
+Both runs fail exactly one test, the same one: `subscription-auth` "main loader resolves Pi's import-only PUBLIC package exports…" (`ERR_PACKAGE_PATH_NOT_EXPORTED` from `@earendil-works/pi-ai` in this environment). The fork adds 82 tests. Upstream 0.4.1 composes **byte-identical** agent prompts to 0.3.7, so the goldens, and every profile on/off guarantee below, carried over unchanged.
+
+Merging 0.4.1 surfaced one behavior change, and it's in the fork's favor: upstream's PDF reader now resolves paths itself, so the study-folder boundary also holds *inside* the reader, not only at the job runner. Seven upstream test files read fixtures outside any study folder and were given a study root ([changes](02-changes.md)).
+
+## History: fork on upstream v0.3.7 (`b277ee3`)
+
+| Check | Upstream `b277ee3` (unmodified) | Fork, frozen candidate | After round 1 | After round 2 | After round 3 |
 |---|---|---|---|---|---|
-| `npm test` | 2,126 / 2,129 pass | 2,174 / 2,176 | 2,194 / 2,196 | 2,201 / 2,203 | **2,202 / 2,204** |
-| `npm run lint` | pass | pass | pass | pass | **pass** |
-| `npm run typecheck` | pass | pass | pass | pass | **pass** |
-| `npm run build` | pass | pass | pass | pass | **pass** |
+| `npm test` | 2,126 / 2,129 pass | 2,174 / 2,176 | 2,194 / 2,196 | 2,201 / 2,203 | 2,202 / 2,204 |
+| `npm run lint` | pass | pass | pass | pass | pass |
+| `npm run typecheck` | pass | pass | pass | pass | pass |
+| `npm run build` | pass | pass | pass | pass | pass |
 
-The final run fails exactly two tests, both of which also failed on unmodified upstream at baseline: `chatgpt-auth` "repeated real verified sign-in…" and `subscription-auth` "main loader…".
-
-**Every remaining failure is pre-existing upstream behavior in a file the fork doesn't touch:**
+**Every v0.3.7 failure was pre-existing upstream behavior in a file the fork doesn't touch:**
 
 | Test | On unmodified upstream | Cause |
 |---|---|---|
-| `subscription-auth`: "main loader resolves Pi's import-only PUBLIC package exports…" | fails every run | `ERR_PACKAGE_PATH_NOT_EXPORTED` from `@earendil-works/pi-ai` in this environment |
-| `chatgpt-connection-ui`: "real main/control bridge…" | flaky (failed 1 of 4 reruns on pristine upstream, 0 of 4 on the fork) | timing |
-| `chatgpt-auth` (2 different tests across runs) | flaky under full-suite load (failed in the baseline full run; passes 5 of 5 in isolation on both pristine upstream and the fork) | timing |
+| `subscription-auth`: "main loader…" | fails every run | environment (see above) |
+| `chatgpt-connection-ui`: "real main/control bridge…" | flaky (failed 1 of 4 reruns on pristine upstream) | timing |
+| `chatgpt-auth` (2 different tests across runs) | flaky under full-suite load (passes 5 of 5 in isolation on both trees) | timing |
 | `demos`: "runJob still steers on visual failure…" | flaky (failed at baseline only) | timing |
 
-The frozen candidate had one real regression: `prompt-overrides` pinned the exact segment list, and the new empty profile segment is now on it. That pin was updated on purpose and documented in [changes](02-changes.md).
+The frozen v0.3.7 candidate had one real regression: `prompt-overrides` pinned the exact segment list, and the new empty profile segment is now on it. That pin was updated on purpose.
 
-## What the new tests prove (75 tests)
+## What the new tests prove (82 tests)
 
 | Claim | Evidence | Test |
 |---|---|---|
@@ -39,7 +50,7 @@ The frozen candidate had one real regression: `prompt-overrides` pinned the exac
 | Study-folder boundary | Traversal, deep traversal, outside absolute paths, `$HOME`, `~/.ssh`, `/etc/passwd`, file and directory symlink escapes, sibling-prefix trick, PDF job, SVG `<image href>` (rendered end to end: the pixel stays white) | `hayden-study-boundary`, `jobs` |
 | Transcript checker | Each rule fires on its violation and stays quiet on realistic physics wording (critic's cases) | `hayden-transcript-checks` |
 
-**What none of this proves:** that a live model *follows* the profile. Fixtures test the plumbing and the record. **Live tutoring quality is unverified.** The instruments for checking it are `hayden/evals/check-session.ts` and the [7-day retention protocol](../learnharness/hayden/evals/retention-protocol.md).
+**What none of this proves:** that a live model *follows* the profile. Fixtures test the plumbing and the record. **Live tutoring quality is unverified.** It's now one command away: `hayden/evals/live-eval.ts --confirm-spend --max-usd 0.50` runs four scripted learners through the real app against your model and scores the transcripts. Its free `--dry-run` passes end to end here, with every learner policy verified against the saved records (the right answers are right, the misconception is wrong at 95% confidence, the interruption stops, resumes and stops again, and practice submits a wrong attempt, then the answer, then moves on). Learning itself is measured by the [7-day retention protocol](../learnharness/hayden/evals/retention-protocol.md).
 
 ## Independent critic
 
@@ -101,4 +112,5 @@ The repair budget is spent and acceptance passes, so the review stops here.
 - **The problem's committed solution is in the browser payload** (upstream design): the practice UI never renders it before conclude (upstream test `render-practice-surface`), but it's visible in DevTools. Fixing that would change upstream's view contract, so it's out of scope for a 5% fork.
 - **The reference video couldn't be reached** from this environment (YouTube blocked by the proxy, no transcript found). The build rests on the repository alone.
 - **The cost meter in the screenshots** (e.g. "$0.0023") is upstream's estimate for the configured model ID applied to scripted turns. No API call was made.
+- **Files dropped into a message from outside the study folder are refused.** 0.4.1 lets you drag a file into the composer as a path chip. The agent can only open it if it's inside the study folder, and otherwise tells you where the folder is.
 - **The study folder defaults to `<data dir>/study`.** In the desktop app that's inside the app's data directory, so set `LH_STUDY_DIR` to a folder you use.
