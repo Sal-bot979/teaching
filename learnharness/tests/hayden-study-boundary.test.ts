@@ -201,7 +201,7 @@ describe("study-folder boundary — real browser (demo page, SVG fallback)", { s
 		const { getHeadless } = await import("../src/agent/subagents/headless.ts");
 		const f = secret();
 		const html = `<!doctype html><html><body><img src="file://${f}" onload="window.R='LOADED'" onerror="window.R='BLOCKED'"><img src="file://${f}.missing" onerror="window.M='BLOCKED'"></body></html>`;
-		const r = await getHeadless().runDemo(html, { settleMs: 800, probe: () => [(window as unknown as { R: string }).R, (window as unknown as { M: string }).M] });
+		const r = await getHeadless().runDemo(html, { settleMs: 800, probe: "[window.R, window.M]" });
 		assert.deepEqual(r.probeResult, ["BLOCKED", "BLOCKED"]);
 		assert.ok(r.failedRequests.every((x) => x.includes("ERR_ACCESS_DENIED")), "existing and missing files fail identically (no existence oracle)");
 	});
