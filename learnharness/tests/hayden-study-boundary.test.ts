@@ -168,3 +168,54 @@ describe("study-folder boundary — critic round 2 (SVG bypasses)", () => {
 		assert.doesNotMatch(stripExternalRefs("<svg><image x='0'xlink:href='/etc/secret.png'/></svg>"), /secret/);
 	});
 });
+
+describe("study-folder boundary — critic round 4 (non-ASCII namespace prefix)", () => {
+	it("an href under any namespace prefix, Unicode included, is stripped and nothing is read", async () => {
+		const { stripExternalRefs, getHeadless } = await import("../src/agent/subagents/headless.ts");
+		const red = path.join(OUTSIDE, "red4.png");
+		fs.writeFileSync(red, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64"));
+		for (const prefix of ["é", "ñs", "名前", "x-y.z"]) {
+			const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:${prefix}="http://www.w3.org/1999/xlink" width="20" height="20"><image ${prefix}:href="${red}" width="20" height="20"/></svg>`;
+			assert.doesNotMatch(stripExternalRefs(svg), /red4\.png/, prefix);
+			const png = await getHeadless().renderSvg(svg);
+			const { Resvg } = await import("@resvg/resvg-js");
+			const probe = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="data:image/png;base64,${png.toString("base64")}" width="20" height="20"/></svg>`);
+			assert.deepEqual([...probe.render().pixels.subarray(0, 3)], [255, 255, 255], `leaked via ${prefix}:href`);
+		}
+	});
+});
+
+// Real-browser checks: they run where a Chrome/Chromium is available
+// (CHROME_PATH, or the Playwright Chromium in cloud sandboxes) and skip
+// otherwise. Both reproduce local-file reads on unmodified upstream 0.4.1.
+const CHROME = [process.env.CHROME_PATH, "/opt/pw-browsers/chromium-1243/chrome-linux64/chrome"].find((p) => p && fs.existsSync(p));
+describe("study-folder boundary — real browser (demo page, SVG fallback)", { skip: CHROME ? false : "no Chrome available" }, () => {
+	const secret = () => {
+		const f = path.join(OUTSIDE, "browser-secret.png");
+		fs.writeFileSync(f, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64"));
+		return f;
+	};
+
+	it("a demo page cannot load a local file (every file: request but the demo is refused alike)", async () => {
+		process.env.CHROME_PATH = CHROME;
+		const { getHeadless } = await import("../src/agent/subagents/headless.ts");
+		const f = secret();
+		const html = `<!doctype html><html><body><img src="file://${f}" onload="window.R='LOADED'" onerror="window.R='BLOCKED'"><img src="file://${f}.missing" onerror="window.M='BLOCKED'"></body></html>`;
+		const r = await getHeadless().runDemo(html, { settleMs: 800, probe: () => [(window as unknown as { R: string }).R, (window as unknown as { M: string }).M] });
+		assert.deepEqual(r.probeResult, ["BLOCKED", "BLOCKED"]);
+		assert.ok(r.failedRequests.every((x) => x.includes("ERR_ACCESS_DENIED")), "existing and missing files fail identically (no existence oracle)");
+	});
+
+	it("the SVG browser fallback cannot load a local file through <foreignObject><img src>", async () => {
+		process.env.CHROME_PATH = CHROME;
+		const { getHeadless } = await import("../src/agent/subagents/headless.ts");
+		const { Resvg } = await import("@resvg/resvg-js");
+		const f = secret();
+		// No xmlns: resvg rejects it, so the browser fallback renders it.
+		const png = await getHeadless().renderSvg(`<svg width="40" height="40"><foreignObject width="40" height="40"><img src="file://${f}" width="40" height="40"/></foreignObject></svg>`);
+		const probe = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><image href="data:image/png;base64,${png.toString("base64")}" width="40" height="40"/></svg>`);
+		const px = probe.render().pixels;
+		const centre = 4 * (40 * 20 + 20);
+		assert.deepEqual([...px.subarray(centre, centre + 3)], [255, 255, 255]);
+	});
+});

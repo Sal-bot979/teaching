@@ -10,14 +10,22 @@
  *       Settings → Models strong slot names, through the app's own request
  *       path, stopping at the dollar cap (priced turns) or the turn cap.
  *
- * Honors LH_DATA_DIR — point it at a throwaway directory holding a COPY of
- * your settings.json (and prompts/ for the profile override) so the eval
- * sessions never mix with your real ones. The learner is a script: it is
- * consistent and cheap, not a person. Findings are screens (see
- * transcript-checks.ts), not verdicts.
+ * A live run REQUIRES LH_DATA_DIR pointing at a throwaway directory holding
+ * a COPY of your settings.json (and prompts/ for the profile override): the
+ * eval sessions never mix with your real ones, and graph extraction is
+ * switched off in that copy (it is not what is measured, and it spends).
+ * A dry run without LH_DATA_DIR uses a fresh temp directory.
+ *
+ * The cap counts every priced model call the sessions make — turns and
+ * background jobs (research, pdf, demo, visual) — and is checked BETWEEN
+ * learner turns, so one long turn can pass it. A model the app cannot price
+ * (subscription, custom) is reported as unpriced and only the turn cap
+ * applies: the run says so up front. The learner is a script: consistent
+ * and cheap, not a person. Findings are screens, not verdicts.
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AssistantMessage, FauxResponseStep } from "@earendil-works/pi-ai";
@@ -48,12 +56,17 @@ const OPENERS: Record<Persona, string> = {
 	interruption: "Normal session (~25 min). Goal: why minimizing cross-entropy for a binary classifier is maximum-likelihood estimation.",
 	practice: "Practice: LQ fractionation and BED, new numbers please.",
 };
+const WRONG_ATTEMPT = "I just divided total dose by fractions and compared: 60 > 45 so A, by 15.";
 const MISCONCEPTION = "α/β is the tolerance dose of the tissue, so a high α/β tissue is the fragile one and suffers more from big fractions.";
 
 /** Numbers (2+ digits) in the solution that the statement never
  *  mentions — derived results a hint must not hand over. */
 export function revealedSolutionNumbers(statement: string, modelSolution: string, hint: string): string[] {
-	const nums = (s: string) => new Set(s.match(/\d+(?:\.\d+)?/g)?.filter((n) => n.replace(".", "").length >= 2) ?? []);
+	// Numerically normalized (100.0 ≡ 100). Every number the solution
+	// contains but the statement does not counts — derived single digits
+	// ("2 Gy per fraction") included. A screen: a hint may legitimately
+	// mention such a number; read the flagged session before concluding.
+	const nums = (s: string) => new Set((s.match(/\d+(?:\.\d+)?/g) ?? []).map((n) => String(Number(n))));
 	const given = nums(statement);
 	const hintNums = nums(hint);
 	return [...nums(modelSolution)].filter((n) => !given.has(n) && hintNums.has(n));
@@ -65,14 +78,30 @@ const textOf = (m: LhMessage) => {
 	return Array.isArray(c) ? (c as Array<{ type: string; text?: string }>).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n") : "";
 };
 
-export async function runEval(opts: { dryRun: boolean; maxUsd: number; maxTurns: number; personas?: Persona[]; log?: (s: string) => void }): Promise<ScenarioResult[]> {
+export async function runEval(opts: { dryRun: boolean; confirmSpend?: boolean; maxUsd: number; maxTurns: number; personas?: Persona[]; log?: (s: string) => void }): Promise<ScenarioResult[]> {
 	const log = opts.log ?? console.log;
+	// The spend gate lives HERE, not only in the CLI: no importer can run a
+	// live eval by accident.
+	if (!opts.dryRun && opts.confirmSpend !== true) throw new Error("runEval: a live run calls your configured model and may cost money — pass confirmSpend: true.");
+	if (!opts.dryRun && !process.env.LH_DATA_DIR) throw new Error("runEval: a live run needs LH_DATA_DIR pointing at a throwaway COPY of your data directory.");
+	if (!(opts.maxUsd >= 0) || !(opts.maxTurns >= 1)) throw new Error("runEval: maxUsd must be ≥ 0 and maxTurns ≥ 1.");
 	const { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall } = await import("@earendil-works/pi-ai");
 	const { handleChatRequest } = await import("../../src/server/chat-handler.ts");
 	const { runningTurn } = await import("../../src/server/turn-runs.ts");
 	const { isTurnRunning } = await import("../../src/server/turn-liveness.ts");
 	const { chatStore } = await import("../../src/store/chats.ts");
-	const { sessionCost } = await import("../../src/server/pricing.ts");
+	const { sessionCost, jobCost } = await import("../../src/server/pricing.ts");
+	const { jobStore } = await import("../../src/store/jobs.ts");
+	const { isSubscriptionModel } = await import("../../src/core/prices.ts");
+	const { readSettings, writeSettings } = await import("../../src/store/settings.ts");
+	if (!opts.dryRun) {
+		// Extraction is not what is measured, and it spends: off in the eval copy.
+		const current = readSettings() ?? { version: 1 };
+		writeSettings({ ...current, graph: { ...(current.graph ?? {}), enabled: false } });
+		const strong = current.models?.strong?.model;
+		if (!strong) throw new Error("runEval: no strong model configured in this data dir's settings.json (Settings → Models).");
+		log(`Live eval against ${strong.provider}:${strong.id} — cap $${opts.maxUsd}, ${opts.maxTurns} learner turns per persona.`);
+	}
 	const { activeProblemOf, danglingQuestionOf } = await import("../../src/core/index.ts");
 	const { toolQuestionKind } = await import("../../src/core/pending.ts");
 	const { buildAnswer, normalizeOptions, normalizeQuizType, resolveCorrect } = await import("../../src/core/question-core.ts");
@@ -159,7 +188,20 @@ export async function runEval(opts: { dryRun: boolean; maxUsd: number; maxTurns:
 		const factory: Factory | undefined = engine
 			? (o) => (persona === "practice" ? createPracticeAgent({ chatId, chatStore }, { ...o, engine }) : createTeacherAgent(undefined, { ...o, engine }))
 			: undefined;
-		const costNow = () => sessionCost(chatStore.getChat(chatId)!);
+		// Turns + background jobs; subscription and unpriced calls count as unpriced.
+		const costNow = () => {
+			const record = chatStore.getChat(chatId)!;
+			const turns = sessionCost(record);
+			let cost = turns.cost;
+			let unpriced = turns.unpriced + (turns.subscription ?? 0);
+			for (const job of jobStore.listJobs(chatId)) {
+				if (!job.usage) continue;
+				const dollars = isSubscriptionModel(job.usage.model) ? null : jobCost(job);
+				if (dollars === null) unpriced++;
+				else cost += dollars;
+			}
+			return { cost, unpriced };
+		};
 		let learnerTurns = 0;
 		let stoppedBy: ScenarioResult["stoppedBy"] = "script";
 		let firstQuiz = true;
@@ -176,7 +218,13 @@ export async function runEval(opts: { dryRun: boolean; maxUsd: number; maxTurns:
 			if (next === undefined) break;
 			if (learnerTurns >= opts.maxTurns && phase === "learning") { stoppedBy = "turn-cap"; break; }
 			if (!opts.dryRun && spent + costNow().cost > opts.maxUsd) { stoppedBy = "budget"; break; }
-			await send(chatId, next, factory);
+			try {
+				await send(chatId, next, factory);
+			} catch (err) {
+				log(`${persona}: ${err instanceof Error ? err.message : String(err)}`);
+				stoppedBy = "stuck";
+				break;
+			}
 			learnerTurns++;
 			const msgs = chatStore.getChat(chatId)!.messages;
 
@@ -199,11 +247,15 @@ export async function runEval(opts: { dryRun: boolean; maxUsd: number; maxTurns:
 				const pose = problem.input as { statement?: string; modelSolution?: string };
 				if (practiceAttempts === 0) {
 					practiceAttempts++;
-					script.push({ type: "thinking", problemCallId: problem.toolCallId, text: "I just divided total dose by fractions and compared: 60 > 45 so A, by 15." });
+					script.push({ type: "thinking", problemCallId: problem.toolCallId, text: WRONG_ATTEMPT });
 				} else {
-					// After a wrong attempt: did the reply hand over solution numbers?
-					const reply = msgs.filter((m) => m.role === "assistant").slice(-1).map(textOf).join("\n");
-					revealLeaks.push(...revealedSolutionNumbers(pose.statement ?? "", pose.modelSolution ?? "", reply));
+					// The reply to the wrong attempt is a hint (the problem is still
+					// active): did it hand over solution numbers the learner lacked?
+					if (practiceAttempts === 1) {
+						const turnReplies = msgs.slice(msgs.findLastIndex((m) => m.role === "custom") + 1).filter((m) => m.role === "assistant").map(textOf).join("\n");
+						revealLeaks.push(...revealedSolutionNumbers(`${pose.statement ?? ""}\n${WRONG_ATTEMPT}`, pose.modelSolution ?? "", turnReplies));
+					}
+					practiceAttempts++;
 					script.push({ type: "thinking", problemCallId: problem.toolCallId, text: `Final answer: ${pose.modelSolution ?? "done"}` });
 				}
 			} else if (persona === "practice") {
@@ -215,6 +267,7 @@ export async function runEval(opts: { dryRun: boolean; maxUsd: number; maxTurns:
 			}
 		}
 		if (script.length && stoppedBy === "script") stoppedBy = "stuck";
+		for (let i = 0; i < 600 && isTurnRunning(chatId); i++) await new Promise((r) => setTimeout(r, 100)); // let a wake turn settle before scoring
 		// Dry runs price scripted tokens at the stamped model's rates — fiction.
 		const priced = opts.dryRun ? { cost: 0, unpriced: 0 } : costNow();
 		spent += priced.cost;
@@ -230,7 +283,7 @@ export function renderReport(results: ScenarioResult[], mode: string): string {
 	const lines = [`# Live eval — ${new Date().toISOString()} (${mode})`, "", "| Persona | Learner turns | Cost | Median words/turn | Resume point on stop | Findings | Practice reveal leaks | Stopped by |", "|---|---|---|---|---|---|---|---|"];
 	for (const r of results) {
 		const resume = r.report.resumePointRequired ? (r.report.resumePointPresent ? "present" : "**missing**") : "n/a";
-		lines.push(`| ${r.persona} | ${r.learnerTurns} | $${r.costUsd.toFixed(4)}${r.unpricedTurns ? ` +${r.unpricedTurns} unpriced` : ""} | ${r.report.medianWords} | ${resume} | ${r.report.findings.map((f) => `${f.rule} (t${f.turn})`).join(", ") || "none"} | ${r.revealLeaks.join(", ") || "none"} | ${r.stoppedBy} |`);
+		lines.push(`| ${r.persona} | ${r.learnerTurns} | ${mode.startsWith("dry") ? "n/a" : `$${r.costUsd.toFixed(4)}${r.unpricedTurns ? ` + ${r.unpricedTurns} unpriced call(s)` : ""}`} | ${r.report.medianWords} | ${resume} | ${r.report.findings.map((f) => `${f.rule} (t${f.turn})`).join(", ") || "none"} | ${r.revealLeaks.join(", ") || "none"} | ${r.stoppedBy} |`);
 	}
 	lines.push("", "Findings are pattern screens: read the session (`check-session.ts <chatId>`) before trusting any of them. Session ids: " + results.map((r) => `${r.persona}=\`${r.chatId}\``).join(", ") + ".");
 	return lines.join("\n") + "\n";
@@ -238,20 +291,32 @@ export function renderReport(results: ScenarioResult[], mode: string): string {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	const args = process.argv.slice(2);
-	const flag = (name: string, fallback: number) => {
+	const flag = (name: string, fallback: number, min: number) => {
 		const i = args.indexOf(name);
-		const v = i >= 0 ? Number(args[i + 1]) : fallback;
-		return Number.isFinite(v) && v > 0 ? v : fallback;
+		if (i < 0) return fallback;
+		const v = Number(args[i + 1]);
+		if (!Number.isFinite(v) || v < min) {
+			console.error(`Refusing: ${name} needs a number ≥ ${min} (got "${args[i + 1] ?? ""}").`);
+			process.exit(2);
+		}
+		return v;
 	};
 	const dryRun = args.includes("--dry-run");
 	if (!dryRun && !args.includes("--confirm-spend")) {
 		console.error("Refusing: a live eval calls your configured model and may cost money.\n  Free rehearsal:  npx tsx hayden/evals/live-eval.ts --dry-run\n  Real run:        npx tsx hayden/evals/live-eval.ts --confirm-spend [--max-usd 0.50] [--max-turns 8]");
 		process.exit(2);
 	}
-	if (dryRun) process.env.OPENROUTER_API_KEY ??= "dry-run-key-presence-only";
-	const maxUsd = flag("--max-usd", 0.5);
-	const maxTurns = flag("--max-turns", 8);
-	const results = await runEval({ dryRun, maxUsd, maxTurns });
+	if (!dryRun && !process.env.LH_DATA_DIR) {
+		console.error("Refusing: a live run needs LH_DATA_DIR pointing at a throwaway COPY of your data directory (settings.json, prompts/), so eval sessions never mix with yours.");
+		process.exit(2);
+	}
+	if (dryRun) {
+		process.env.LH_DATA_DIR ??= fs.mkdtempSync(path.join(os.tmpdir(), "lh-live-eval-dry-"));
+		process.env.OPENROUTER_API_KEY ??= "dry-run-key-presence-only";
+	}
+	const maxUsd = flag("--max-usd", 0.5, 0.01);
+	const maxTurns = flag("--max-turns", 8, 1);
+	const results = await runEval({ dryRun, confirmSpend: !dryRun, maxUsd, maxTurns });
 	const report = renderReport(results, dryRun ? "dry run, scripted tutor" : `live, cap $${maxUsd}`);
 	const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "live-results");
 	fs.mkdirSync(dir, { recursive: true });

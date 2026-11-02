@@ -299,9 +299,20 @@ async function runDemo(html: string, opts: RunDemoOptions = {}): Promise<DemoRun
 		});
 		page.on("pageerror", (err) => pageErrors.push(err instanceof Error ? err.message : String(err)));
 		page.on("requestfailed", (req) => failedRequests.push(`${req.url()} (${req.failure()?.errorText ?? "failed"})`));
+		// Study-folder boundary (Hayden fork): the demo loads from file://, so
+		// model HTML could pull local files (img/script/iframe src). Every
+		// file: request but the demo itself is refused the same way, so a
+		// failure reveals nothing about what exists; https CDNs still load.
+		const demoUrl = pathToFileURL(file).href;
+		await page.setRequestInterception(true);
+		page.on("request", (req) => {
+			if (req.isInterceptResolutionHandled()) return;
+			if (req.url().startsWith("file:") && req.url() !== demoUrl) void req.abort("accessdenied");
+			else void req.continue();
+		});
 
 		try {
-			await page.goto(pathToFileURL(file).href, { waitUntil: "load", timeout: 30_000 });
+			await page.goto(demoUrl, { waitUntil: "load", timeout: 30_000 });
 			await new Promise((resolve) => setTimeout(resolve, settleMs));
 			if (opts.probe) {
 				try {
@@ -422,7 +433,10 @@ export function stripExternalRefs(svg: string): string {
 	return svg
 		.replace(/<!DOCTYPE[^[>]*(\[[\s\S]*?\])?\s*>/gi, "")
 		.replace(/<meta\b[^>]*>/gi, "")
-		.replace(/(?:\s|(?<=["']))(?:[\w.-]+:)?href\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (attr, raw: string) => {
+		// Any attribute NAME ending in "href" — whatever its namespace prefix
+		// (xlink:, foo:, é:, …): a prefix-character allowlist was bypassed
+		// three times, so the name is matched by what it is not.
+		.replace(/(?:\s|(?<=["']))[^\s=<>"'/]*href\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (attr, raw: string) => {
 			const value = raw.replace(/^["']|["']$/g, "").trim();
 			return /^(data:|#)/i.test(value) ? attr : "";
 		});

@@ -107,6 +107,22 @@ One theoretical gap was noted: a lenient HTML-mode parse on the browser fallback
 
 The repair budget is spent and acceptance passes, so the review stops here.
 
+### Round 4 (after the v0.4.1 merge)
+
+A fresh critic reviewed the merge, the live eval and the test adaptations. It confirmed the boundary call sites, imports, file-path chips, Electron preload, custom providers and every test adaptation as sound, and found:
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | **High:** the SVG stripper missed namespace prefixes with non-ASCII characters (`é:href`); resvg loaded the file | Any attribute *name* ending in `href` is now matched by what it is not (no character allowlist). The critic's own probe now renders white for all vectors. |
+| 2 | Suspected: demo pages load from `file://` with no CSP | **Confirmed in a real Chromium and fixed:** unmodified v0.4.1 loads a local file into a demo; the fork aborts every `file:` request but the demo itself. The SVG browser fallback was probed the same way (`<foreignObject><img src=file:…>`): v0.4.1 renders the file, the fork's CSP blocks it. Both are now real-browser tests that run wherever Chrome is available. |
+| 3 | The eval's dollar cap ignored background jobs and extraction; unpriced/subscription models showed `$0` | The cap counts turns and jobs; extraction is switched off in the eval's data-dir copy; unpriced calls are reported as such |
+| 4 | `--max-usd 0` silently became $0.50; `runEval` itself had no spend gate | Invalid caps are refused; `runEval` throws without `confirmSpend: true`; a live run requires `LH_DATA_DIR` |
+| 5 | Leak screen missed derived single digits and reformatted numbers, and could re-screen a confirmation | Numbers normalized; derived single digits count; only the hint after the first wrong attempt is screened |
+| 6 | The eval test assumed "free" without proving it | The test traps `fetch` and asserts zero network calls; adds spend-gate and cap-refusal tests |
+| 7 | The fork dropped upstream's Windows `~\` expansion, and the adapted test hid it | Upstream's tilde rule restored verbatim; the test asserts it on every platform |
+
+Not changed, with reasons: the Claude Code provider loads `~/.claude/settings.json` (`--setting-sources user`). That's upstream design for a provider you opt into; its tools are disabled (`--tools ""`) and bridged back to the harness tools, which the boundary covers.
+
 ## Known limitations
 
 - **The problem's committed solution is in the browser payload** (upstream design): the practice UI never renders it before conclude (upstream test `render-practice-surface`), but it's visible in DevTools. Fixing that would change upstream's view contract, so it's out of scope for a 5% fork.

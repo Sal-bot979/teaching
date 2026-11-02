@@ -1,6 +1,6 @@
 # What changed and why
 
-Upstream app code changed: **8 files, +75 / −12 lines**. The other ~1,800 lines are new tests, the `hayden/` folder (profile text, toggle script, templates, eval tools, upstream goldens) and docs. Nothing in the knowledge graph, sessions/persistence, providers, UI components or the license was touched.
+Upstream app code changed (against v0.4.1): **8 files**, all in the agent layer; `git diff 2270bd7 HEAD --stat -- learnharness/src` gives the exact count. The other ~1,800 lines are new tests, the `hayden/` folder (profile text, toggle script, templates, eval tools, upstream goldens) and docs. Nothing in the knowledge graph, sessions/persistence, providers, UI components or the license was touched.
 
 ## Upstream source files
 
@@ -12,6 +12,7 @@ Upstream app code changed: **8 files, +75 / −12 lines**. The other ~1,800 line
 | `src/agent/tools/fs-shared.ts` | `studyRoot()`; `resolveSourcePath` now confines paths | **Security exception.** Upstream resolved learner paths against the entire home directory. Now relative paths resolve inside `LH_STUDY_DIR` (default `<data>/study`). Traversal, outside absolute paths, `~`, and symlinks whose real target is outside are rejected with an error the model sees. |
 | `src/agent/subagents/runner.ts` | PDF job path goes through `resolveSourcePath` | The learner PDF job read raw paths. It now follows the same boundary, and a refusal becomes a normal "PDF failed" brief. |
 | `src/agent/subagents/headless.ts` | `stripExternalRefs` before SVG rendering; CSP meta on the browser-fallback page | **Security, added in repair round 1.** A model-written SVG figure could load any local image by absolute path (`<image href="/home/…">`), through resvg or the `file://` fallback page. Any `*href` (any namespace prefix) that isn't `data:` or `#id` is dropped, DOCTYPE and `<meta>` are removed (round 2), and the fallback blocks every external fetch. `data:` images and `#id` references still work. |
+| `src/agent/subagents/headless.ts` (critic round 4) | Demo pages: every `file:` request except the demo itself is aborted the same way | **Security, closes an upstream gap.** Model-written demo HTML loaded from `file://` could pull any local file (`<img>`, `<script>`, `<iframe>`). Verified in a real Chromium: unmodified v0.4.1 loads it, the fork returns `ERR_ACCESS_DENIED` for existing and missing files alike, so failures reveal nothing. https CDNs still load. |
 | `src/agent/prompts/shared/30-learner-files.md` | 1 sentence | The doctrine said paths resolve against the home directory, which is no longer true. |
 | `src/agent/prompts/teacher/40-jobs.md` | 2 words | "home-anchored" → "anchored to his study folder", for the same reason. |
 

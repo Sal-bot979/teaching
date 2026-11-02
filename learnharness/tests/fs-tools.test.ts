@@ -91,8 +91,8 @@ describe("glob helpers (fs-shared)", () => {
 	});
 });
 
-// Hayden fork: upstream's tilde semantics are kept (a leading ~ or ~/ is
-// the home directory, ~user and inner tildes are literal) — and every
+// Hayden fork: upstream's tilde semantics are kept (a leading ~, ~/ or ~<sep>
+// is the home directory, ~user and inner tildes are literal) — and every
 // result is then held to the study folder. A synthetic home holds it.
 describe("resolveSourcePath (fs-shared)", () => {
 	const withStudyHome = (fn: (home: string, study: string) => void) => {
@@ -130,10 +130,11 @@ describe("resolveSourcePath (fs-shared)", () => {
 		});
 	});
 
-	it("backslash is literal on POSIX (stays inside the study folder)", () => {
+	it("backslash is a home separator only on Windows", () => {
 		withStudyHome((_home, study) => {
-			if (process.platform === "win32") return;
-			assert.equal(resolveSourcePath("~\\notes\\calculus.md"), path.join(study, "~\\notes\\calculus.md"));
+			const input = "~\\Study\\calculus.md";
+			const expected = process.platform === "win32" ? path.join(study, "calculus.md") : path.join(study, input);
+			assert.equal(resolveSourcePath(input), expected);
 		});
 	});
 

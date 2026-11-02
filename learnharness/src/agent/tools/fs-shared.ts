@@ -53,7 +53,9 @@ export function studyRoot(): string {
  *  outside absolute path, or a symlink whose real target is outside. */
 export function resolveSourcePath(p?: string): string {
 	const root = studyRoot();
-	const resolved = !p ? root : path.resolve(root, p.startsWith("~") ? p.replace(/^~(?=$|\/)/, os.homedir()) : p);
+	// Upstream's tilde rule: a leading ~, ~/ or ~<sep> is home; ~user is literal.
+	const expanded = p === "~" || p?.startsWith("~/") || p?.startsWith(`~${path.sep}`) ? path.join(os.homedir(), p.slice(1)) : p;
+	const resolved = !expanded ? root : path.resolve(root, expanded);
 	let realRoot = root;
 	try {
 		realRoot = fsSync.realpathSync(root);

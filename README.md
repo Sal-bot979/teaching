@@ -43,7 +43,7 @@ Before relying on a model, run the synthetic-learner eval once: `npx tsx hayden/
 - Session history and persistence, providers, visuals and the UI
 - The AGPL license and credit
 
-The app-code diff against v0.4.1 is 8 files, +75 / −14.
+The app-code diff against v0.4.1 is 8 files, +92 / −15.
 
 **Personalized (opt-in, one switch):**
 - One step and one question per turn, brief by default

@@ -15,8 +15,19 @@ import { after, describe, it } from "node:test";
 
 const TMP_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "lh-hayden-live-eval-"));
 process.env.LH_DATA_DIR = TMP_DATA;
+process.env.LH_AUTH_FILE = path.join(TMP_DATA, "auth.json");
 process.env.OPENROUTER_API_KEY ??= "test-key-presence-gate";
-after(() => fs.rmSync(TMP_DATA, { recursive: true, force: true }));
+// "Free" is proven, not assumed: any network call fails the run and is counted.
+let fetchCalls = 0;
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (input: unknown) => {
+	fetchCalls++;
+	throw new Error(`unexpected network call: ${String(input)}`);
+};
+after(() => {
+	globalThis.fetch = originalFetch;
+	fs.rmSync(TMP_DATA, { recursive: true, force: true });
+});
 
 const { runEval, renderReport, revealedSolutionNumbers } = await import("../hayden/evals/live-eval.ts");
 const { chatStore } = await import("../src/store/chats.ts");
@@ -30,7 +41,8 @@ describe("live eval — dry run through the real request path", async () => {
 	const results = await runEval({ dryRun: true, maxUsd: 0.5, maxTurns: 6, log: () => {} });
 	const by = Object.fromEntries(results.map((r) => [r.persona, r]));
 
-	it("runs all four personas to their scripted stop, free", () => {
+	it("runs all four personas to their scripted stop, with zero network calls", () => {
+		assert.equal(fetchCalls, 0, "a dry run must never reach the network");
 		assert.deepEqual(results.map((r) => r.persona), ["correct", "misconception", "interruption", "practice"]);
 		for (const r of results) {
 			assert.equal(r.stoppedBy, "script", r.persona);
@@ -81,6 +93,23 @@ describe("live eval — practice reveal screen", () => {
 		assert.deepEqual(revealedSolutionNumbers(statement, solution, "Re-read: 60 Gy over 30 fractions — what is d?"), []);
 		assert.deepEqual(revealedSolutionNumbers(statement, solution, "Check the dose per fraction first."), []);
 	});
+	it("catches derived single digits and reformatted values (critic round 4)", () => {
+		// d = 2 Gy is derived, not given; "100.0" is the same number as "100".
+		assert.deepEqual(revealedSolutionNumbers(statement, "d = 2 Gy; BED_A = 100 Gy_3", "Hint: you need d = 2 here."), ["2"]);
+		assert.deepEqual(revealedSolutionNumbers(statement, solution, "That works out to 100.0 Gy_3."), ["100"]);
+	});
+});
+
+describe("live eval — runEval never spends by accident", () => {
+	it("a live run without confirmSpend throws before anything happens", async () => {
+		const before = chatStore.listChats().length;
+		await assert.rejects(() => runEval({ dryRun: false, maxUsd: 0.5, maxTurns: 2, log: () => {} }), /confirmSpend: true/);
+		assert.equal(chatStore.listChats().length, before, "no session was created");
+	});
+	it("invalid caps are refused", async () => {
+		await assert.rejects(() => runEval({ dryRun: true, maxUsd: -1, maxTurns: 2, log: () => {} }), /maxUsd must be/);
+		await assert.rejects(() => runEval({ dryRun: true, maxUsd: 0.5, maxTurns: 0, log: () => {} }), /maxTurns/);
+	});
 });
 
 describe("live eval — CLI never spends by accident", () => {
@@ -92,5 +121,22 @@ describe("live eval — CLI never spends by accident", () => {
 		});
 		assert.equal(r.status, 2, r.stderr);
 		assert.match(r.stderr, /Refusing: a live eval calls your configured model and may cost money/);
+	});
+
+	const cli = (args: string[], env: Record<string, string | undefined>) =>
+		spawnSync(process.execPath, ["--import", "tsx", path.join(import.meta.dirname, "..", "hayden", "evals", "live-eval.ts"), ...args], { env: { ...process.env, ...env }, encoding: "utf-8", timeout: 60_000 });
+
+	it("refuses a live run without a throwaway LH_DATA_DIR", () => {
+		const r = cli(["--confirm-spend"], { LH_DATA_DIR: undefined });
+		assert.equal(r.status, 2, r.stderr);
+		assert.match(r.stderr, /needs LH_DATA_DIR/);
+	});
+
+	it("refuses a cap it cannot honor (0, negative, non-numeric) instead of defaulting", () => {
+		for (const bad of ["0", "-1", "abc"]) {
+			const r = cli(["--dry-run", "--max-usd", bad], { LH_DATA_DIR: TMP_DATA });
+			assert.equal(r.status, 2, `--max-usd ${bad}: ${r.stderr}`);
+			assert.match(r.stderr, /--max-usd needs a number/);
+		}
 	});
 });
