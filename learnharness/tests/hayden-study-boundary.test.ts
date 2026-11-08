@@ -1,0 +1,221 @@
+/**
+ * Hayden fork — the study-folder boundary (fs-shared studyRoot /
+ * resolveSourcePath). Learner-file tools (read, ls, find, grep) and the
+ * learner PDF job reach ONLY the study folder: no home-directory scanning,
+ * no `..` traversal, no outside absolute paths, no symlink escape.
+ */
+
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { after, describe, it } from "node:test";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+
+const SANDBOX = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "lh-hayden-boundary-")));
+const STUDY = path.join(SANDBOX, "study");
+const OUTSIDE = path.join(SANDBOX, "outside");
+fs.mkdirSync(path.join(STUDY, "notes"), { recursive: true });
+fs.mkdirSync(OUTSIDE, { recursive: true });
+fs.writeFileSync(path.join(STUDY, "notes", "lq.md"), "BED = nD(1 + d/(alpha/beta))\n");
+fs.writeFileSync(path.join(OUTSIDE, "secret.txt"), "SECRET-TOKEN\n");
+fs.symlinkSync(path.join(OUTSIDE, "secret.txt"), path.join(STUDY, "link-to-secret.txt"));
+fs.symlinkSync(OUTSIDE, path.join(STUDY, "link-to-outside-dir"));
+process.env.LH_STUDY_DIR = STUDY;
+process.env.LH_DATA_DIR = path.join(SANDBOX, "data");
+after(() => fs.rmSync(SANDBOX, { recursive: true, force: true }));
+
+const { resolveSourcePath, studyRoot } = await import("../src/agent/tools/fs-shared.ts");
+const { readTool } = await import("../src/agent/tools/read.ts");
+const { lsTool } = await import("../src/agent/tools/ls.ts");
+const { findTool } = await import("../src/agent/tools/find.ts");
+const { grepTool } = await import("../src/agent/tools/grep.ts");
+
+async function text(tool: AgentTool<any>, params: unknown): Promise<string> {
+	const result = await tool.execute!("c", params);
+	return (result.content[0] as { text: string }).text;
+}
+
+describe("study-folder boundary — resolveSourcePath", () => {
+	it("defaults to the study folder; relative paths resolve inside it", () => {
+		assert.equal(studyRoot(), STUDY);
+		assert.equal(resolveSourcePath(), STUDY);
+		assert.equal(resolveSourcePath("notes/lq.md"), path.join(STUDY, "notes", "lq.md"));
+		assert.equal(resolveSourcePath(path.join(STUDY, "notes")), path.join(STUDY, "notes"));
+	});
+
+	const escapes: Array<[string, string]> = [
+		["dot-dot traversal", "../outside/secret.txt"],
+		["deep traversal", "notes/../../outside/secret.txt"],
+		["outside absolute path", path.join(OUTSIDE, "secret.txt")],
+		["home directory", os.homedir()],
+		["tilde home", "~/.ssh/id_rsa"],
+		["filesystem root", "/etc/passwd"],
+		["symlinked file escaping", "link-to-secret.txt"],
+		["symlinked dir escaping", "link-to-outside-dir/secret.txt"],
+		["sibling prefix trick", `${STUDY}-evil/x.txt`],
+	];
+	for (const [name, p] of escapes) {
+		it(`rejects ${name}`, () => assert.throws(() => resolveSourcePath(p), /Outside the study folder/));
+	}
+
+	it("unset LH_STUDY_DIR → <data dir>/study (never the home directory)", () => {
+		const saved = process.env.LH_STUDY_DIR;
+		delete process.env.LH_STUDY_DIR;
+		try {
+			assert.equal(studyRoot(), path.join(SANDBOX, "data", "study"));
+			assert.notEqual(studyRoot(), os.homedir());
+		} finally {
+			process.env.LH_STUDY_DIR = saved;
+		}
+	});
+});
+
+describe("study-folder boundary — every learner-file tool", () => {
+	it("read: inside works; escape is an error the model sees; secret never returned", async () => {
+		assert.match(await text(readTool, { path: "notes/lq.md" }), /BED/);
+		for (const p of ["../outside/secret.txt", "link-to-secret.txt", path.join(OUTSIDE, "secret.txt")]) {
+			await assert.rejects(() => readTool.execute!("c", { path: p }), /Outside the study folder/);
+		}
+	});
+
+	it("ls: defaults to the study folder; outside rejected", async () => {
+		assert.match(await text(lsTool, {}), /notes\//);
+		await assert.rejects(() => lsTool.execute!("c", { path: OUTSIDE }), /Outside the study folder/);
+		await assert.rejects(() => lsTool.execute!("c", { path: os.homedir() }), /Outside the study folder/);
+	});
+
+	it("find/grep: search the study folder only, never follow symlinks out", async () => {
+		assert.match(await text(findTool, { pattern: "*.md" }), /lq\.md/);
+		assert.doesNotMatch(await text(findTool, { pattern: "*.txt" }), /secret/);
+		assert.doesNotMatch(await text(grepTool, { pattern: "SECRET" }), /SECRET-TOKEN/);
+		await assert.rejects(() => grepTool.execute!("c", { pattern: "SECRET", path: OUTSIDE }), /Outside the study folder/);
+		await assert.rejects(() => findTool.execute!("c", { pattern: "*", path: "/" }), /Outside the study folder/);
+	});
+});
+
+describe("study-folder boundary — critic round 1", () => {
+	it("resolving paths never creates the study folder", () => {
+		const saved = process.env.LH_STUDY_DIR;
+		process.env.LH_STUDY_DIR = path.join(SANDBOX, "not-yet");
+		try {
+			assert.equal(resolveSourcePath("notes.md"), path.join(SANDBOX, "not-yet", "notes.md"));
+			assert.throws(() => resolveSourcePath("../outside/secret.txt"), /Outside the study folder/);
+			assert.equal(fs.existsSync(path.join(SANDBOX, "not-yet")), false);
+		} finally {
+			process.env.LH_STUDY_DIR = saved;
+		}
+	});
+
+	it("SVG figures cannot pull local files: external hrefs are stripped before either renderer", async () => {
+		const { stripExternalRefs, getHeadless } = await import("../src/agent/subagents/headless.ts");
+		const secretPng = path.join(OUTSIDE, "secret.png");
+		// a 1x1 red PNG
+		fs.writeFileSync(secretPng, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64"));
+		const svg = (href: string) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="20" height="20"><image ${href} width="20" height="20"/></svg>`;
+		for (const attack of [`href="${secretPng}"`, `xlink:href='file://${secretPng}'`, `href=${secretPng}`]) {
+			assert.doesNotMatch(stripExternalRefs(svg(attack)), /secret\.png/, attack);
+		}
+		const keep = `href="data:image/png;base64,AAAA"`;
+		assert.match(stripExternalRefs(svg(keep)), /data:image\/png/);
+		assert.match(stripExternalRefs('<svg><use href="#a"/></svg>'), /href="#a"/);
+		// End to end through resvg: the rendered pixel is the white background, not the secret's red.
+		const png = await getHeadless().renderSvg(svg(`href="${secretPng}"`));
+		const { Resvg } = await import("@resvg/resvg-js");
+		const probe = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="20" height="20"><image href="data:image/png;base64,${png.toString("base64")}" width="20" height="20"/></svg>`);
+		const pixels = probe.render().pixels;
+		assert.deepEqual([...pixels.subarray(0, 3)], [255, 255, 255], "no red pixel from the outside file");
+	});
+});
+
+describe("study-folder boundary — critic round 2 (SVG bypasses)", () => {
+	const RED = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+	async function firstPixel(png: Buffer): Promise<number[]> {
+		const { Resvg } = await import("@resvg/resvg-js");
+		const probe = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="data:image/png;base64,${png.toString("base64")}" width="20" height="20"/></svg>`);
+		return [...probe.render().pixels.subarray(0, 3)];
+	}
+
+	it("any namespace prefix, apostrophes in the path, DOCTYPE entities: nothing is read from disk", async () => {
+		const { stripExternalRefs, getHeadless } = await import("../src/agent/subagents/headless.ts");
+		const apostropheDir = path.join(OUTSIDE, "o'neil");
+		fs.mkdirSync(apostropheDir, { recursive: true });
+		const plain = path.join(OUTSIDE, "red.png");
+		const quoted = path.join(apostropheDir, "red.png");
+		fs.writeFileSync(plain, Buffer.from(RED, "base64"));
+		fs.writeFileSync(quoted, Buffer.from(RED, "base64"));
+		const attacks = [
+			`<svg xmlns="http://www.w3.org/2000/svg" xmlns:foo="http://www.w3.org/1999/xlink" width="20" height="20"><image foo:href="${plain}" width="20" height="20"/></svg>`,
+			`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="${quoted}" width="20" height="20"/></svg>`,
+			`<!DOCTYPE svg [<!ENTITY p "${plain}">]><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="&p;" width="20" height="20"/></svg>`,
+		];
+		for (const svg of attacks) {
+			assert.doesNotMatch(stripExternalRefs(svg), /red\.png|ENTITY/, svg);
+			assert.deepEqual(await firstPixel(await getHeadless().renderSvg(svg)), [255, 255, 255], `leaked: ${svg}`);
+		}
+	});
+
+	it("<meta> (refresh navigation on the browser fallback) is removed; data: images survive", async () => {
+		const { stripExternalRefs } = await import("../src/agent/subagents/headless.ts");
+		assert.doesNotMatch(stripExternalRefs('<svg><meta http-equiv="refresh" content="0;url=file:///etc/passwd"/><rect/></svg>'), /meta|passwd/);
+		const inline = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="data:image/png;base64,${RED}" width="20" height="20"/></svg>`;
+		assert.equal(stripExternalRefs(inline), inline);
+	});
+
+	it("an href glued to the previous attribute's quote is stripped too (HTML-mode fallback parses it; critic round 3)", async () => {
+		const { stripExternalRefs } = await import("../src/agent/subagents/headless.ts");
+		assert.doesNotMatch(stripExternalRefs('<svg><image x="0"href="/etc/secret.png"/></svg>'), /secret/);
+		assert.doesNotMatch(stripExternalRefs("<svg><image x='0'xlink:href='/etc/secret.png'/></svg>"), /secret/);
+	});
+});
+
+describe("study-folder boundary — critic round 4 (non-ASCII namespace prefix)", () => {
+	it("an href under any namespace prefix, Unicode included, is stripped and nothing is read", async () => {
+		const { stripExternalRefs, getHeadless } = await import("../src/agent/subagents/headless.ts");
+		const red = path.join(OUTSIDE, "red4.png");
+		fs.writeFileSync(red, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64"));
+		for (const prefix of ["é", "ñs", "名前", "x-y.z"]) {
+			const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:${prefix}="http://www.w3.org/1999/xlink" width="20" height="20"><image ${prefix}:href="${red}" width="20" height="20"/></svg>`;
+			assert.doesNotMatch(stripExternalRefs(svg), /red4\.png/, prefix);
+			const png = await getHeadless().renderSvg(svg);
+			const { Resvg } = await import("@resvg/resvg-js");
+			const probe = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image href="data:image/png;base64,${png.toString("base64")}" width="20" height="20"/></svg>`);
+			assert.deepEqual([...probe.render().pixels.subarray(0, 3)], [255, 255, 255], `leaked via ${prefix}:href`);
+		}
+	});
+});
+
+// Real-browser checks: they run where a Chrome/Chromium is available
+// (CHROME_PATH, or the Playwright Chromium in cloud sandboxes) and skip
+// otherwise. Both reproduce local-file reads on unmodified upstream 0.4.1.
+const CHROME = [process.env.CHROME_PATH, "/opt/pw-browsers/chromium-1243/chrome-linux64/chrome"].find((p) => p && fs.existsSync(p));
+describe("study-folder boundary — real browser (demo page, SVG fallback)", { skip: CHROME ? false : "no Chrome available" }, () => {
+	const secret = () => {
+		const f = path.join(OUTSIDE, "browser-secret.png");
+		fs.writeFileSync(f, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64"));
+		return f;
+	};
+
+	it("a demo page cannot load a local file (every file: request but the demo is refused alike)", async () => {
+		process.env.CHROME_PATH = CHROME;
+		const { getHeadless } = await import("../src/agent/subagents/headless.ts");
+		const f = secret();
+		const html = `<!doctype html><html><body><img src="file://${f}" onload="window.R='LOADED'" onerror="window.R='BLOCKED'"><img src="file://${f}.missing" onerror="window.M='BLOCKED'"></body></html>`;
+		const r = await getHeadless().runDemo(html, { settleMs: 800, probe: "[window.R, window.M]" });
+		assert.deepEqual(r.probeResult, ["BLOCKED", "BLOCKED"]);
+		assert.ok(r.failedRequests.every((x) => x.includes("ERR_ACCESS_DENIED")), "existing and missing files fail identically (no existence oracle)");
+	});
+
+	it("the SVG browser fallback cannot load a local file through <foreignObject><img src>", async () => {
+		process.env.CHROME_PATH = CHROME;
+		const { getHeadless } = await import("../src/agent/subagents/headless.ts");
+		const { Resvg } = await import("@resvg/resvg-js");
+		const f = secret();
+		// No xmlns: resvg rejects it, so the browser fallback renders it.
+		const png = await getHeadless().renderSvg(`<svg width="40" height="40"><foreignObject width="40" height="40"><img src="file://${f}" width="40" height="40"/></foreignObject></svg>`);
+		const probe = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><image href="data:image/png;base64,${png.toString("base64")}" width="40" height="40"/></svg>`);
+		const px = probe.render().pixels;
+		const centre = 4 * (40 * 20 + 20);
+		assert.deepEqual([...px.subarray(centre, centre + 3)], [255, 255, 255]);
+	});
+});

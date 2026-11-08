@@ -1,0 +1,265 @@
+/* Liquid Glass theme. Unlayered, so it wins over Tailwind's layered
+   utilities without touching any component className. Glass is for
+   floating CHROME only; transcript, math, code and cards stay solid. */
+
+:root {
+	--lg-base: #0b0d12;
+	--lg-fill: rgba(28, 30, 38, 0.6);
+	--lg-fill-strong: rgba(28, 30, 38, 0.78);
+	--lg-border: rgba(255, 255, 255, 0.14);
+	--lg-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+	--lg-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+	--lg-scrim: rgba(6, 8, 12, 0.5);
+	--lg-card: rgba(26, 28, 36, 0.94);
+	--lg-hover: rgba(255, 255, 255, 0.1);
+	--lg-ring: #8ab4ff;
+	--lg-blur: blur(20px) saturate(1.6);
+	--lg-r-control: 12px;
+	--lg-r-panel: 20px;
+	--lg-r-pill: 999px;
+	--lg-a1: rgba(99, 102, 241, 0.28);
+	--lg-a2: rgba(34, 211, 238, 0.16);
+	--lg-a3: rgba(244, 114, 182, 0.16);
+}
+
+html.light {
+	color-scheme: light;
+	--lg-base: #eef0f6;
+	--lg-fill: rgba(255, 255, 255, 0.66);
+	--lg-fill-strong: rgba(255, 255, 255, 0.82);
+	--lg-border: rgba(255, 255, 255, 0.85);
+	--lg-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+	--lg-shadow: 0 8px 32px rgba(40, 50, 90, 0.16);
+	--lg-scrim: rgba(230, 233, 243, 0.5);
+	--lg-card: rgba(255, 255, 255, 0.95);
+	--lg-hover: rgba(20, 22, 28, 0.07);
+	--lg-ring: #3b5bdb;
+	--lg-a1: rgba(99, 102, 241, 0.2);
+	--lg-a2: rgba(34, 211, 238, 0.16);
+	--lg-a3: rgba(244, 114, 182, 0.14);
+}
+
+/* Light palette: same variables as globals.css, light values. */
+html.light {
+	--background: #f4f5f9;
+	--foreground: #14161c;
+	--card: #ffffff;
+	--card-foreground: #14161c;
+	--popover: #ffffff;
+	--popover-foreground: #14161c;
+	--primary: #14161c;
+	--primary-foreground: #f4f5f9;
+	--secondary: #eceef4;
+	--secondary-foreground: #14161c;
+	--muted: #eceef4;
+	--muted-foreground: #565b6b;
+	--accent: #e3e6f0;
+	--accent-foreground: #14161c;
+	--destructive: oklch(0.55 0.21 25);
+	--border: #c9cddb;
+	--input: #c9cddb;
+	--ring: #3b5bdb;
+}
+
+/* Ambient backdrop. */
+html body {
+	background: transparent;
+	isolation: isolate;
+}
+html {
+	background: var(--lg-base);
+}
+body::before {
+	content: "";
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	background:
+		radial-gradient(60vw 50vh at 12% 8%, var(--lg-a1), transparent 70%),
+		radial-gradient(50vw 45vh at 90% 20%, var(--lg-a2), transparent 70%),
+		radial-gradient(55vw 50vh at 60% 100%, var(--lg-a3), transparent 70%),
+		var(--lg-base);
+}
+
+/* Glass chrome. */
+html [data-surface="sidebar"],
+html [data-surface="topbar"],
+html [data-testid="composer"],
+html [data-testid="question-dock"],
+html [data-testid="practice-dock"],
+html [data-testid="settings-dialog"],
+html [data-testid="plan-popup"],
+html [role="menu"],
+html [role="tooltip"],
+html [data-lh-menu] {
+	background: var(--lg-fill);
+	-webkit-backdrop-filter: var(--lg-blur);
+	backdrop-filter: var(--lg-blur);
+	border: 1px solid var(--lg-border);
+	box-shadow: var(--lg-highlight), var(--lg-shadow);
+}
+html [data-surface="sidebar"] {
+	border-width: 0 1px 0 0;
+	border-radius: 0;
+}
+html [data-surface="topbar"] {
+	border-width: 0 0 1px 0;
+	border-radius: 0;
+}
+html [data-testid="composer"],
+html [data-testid="question-dock"],
+html [data-testid="practice-dock"] {
+	border-radius: var(--lg-r-panel);
+}
+html [data-testid="settings-dialog"],
+html [data-testid="plan-popup"] {
+	border-radius: var(--lg-r-panel);
+	background: var(--lg-fill-strong);
+}
+html [role="menu"],
+html [role="tooltip"],
+html [data-lh-menu] {
+	border-radius: var(--lg-r-control);
+	background: var(--lg-fill-strong);
+}
+
+/* Never nest blur inside glass; nested surfaces go plain. */
+html [data-surface="sidebar"] [role="menu"],
+html [data-testid="settings-dialog"] [role="menu"],
+html [data-testid="composer"] [role="menu"],
+html [data-testid="question-dock"] [role="menu"],
+html [data-testid="practice-dock"] [role="menu"] {
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+	background: var(--lg-card);
+}
+
+/* Settings scrim: blur lives on a pseudo so the dialog is never a
+   descendant of a filtered element. */
+html [data-testid="settings-backdrop"] {
+	background: var(--lg-scrim);
+}
+html [data-testid="settings-backdrop"]::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	-webkit-backdrop-filter: blur(8px);
+	backdrop-filter: blur(8px);
+	pointer-events: none;
+}
+html [data-testid="settings-backdrop"] > [data-testid="settings-dialog"] {
+	position: relative;
+	z-index: 1;
+}
+
+/* Content stays solid: near-opaque cards, glass-style edge. */
+html [data-testid="problem-card"],
+html [data-testid="conclude-card"],
+html [data-testid="answered-card"],
+html [data-testid="user-message"],
+html [data-testid="plan-marginalia"] {
+	background: var(--lg-card);
+	border-color: var(--lg-border);
+	box-shadow: var(--lg-highlight);
+	border-radius: var(--lg-r-panel);
+}
+
+/* Controls inside glass. */
+html [data-surface="sidebar"] button,
+html [data-surface="topbar"] button,
+html [data-testid="composer"] button,
+html [data-testid="question-dock"] button,
+html [data-testid="practice-dock"] button,
+html [data-testid="settings-dialog"] button,
+html [role="menu"] button {
+	transition: background-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+html [data-surface="sidebar"] button:hover,
+html [data-surface="topbar"] button:hover,
+html [data-testid="composer"] button:hover,
+html [data-testid="question-dock"] button:hover,
+html [data-testid="practice-dock"] button:hover,
+html [data-testid="settings-dialog"] button:hover,
+html [role="menu"] button:hover {
+	background-color: var(--lg-hover);
+}
+html [data-surface="sidebar"] button:active,
+html [data-surface="topbar"] button:active,
+html [data-testid="composer"] button:active,
+html [data-testid="question-dock"] button:active,
+html [data-testid="practice-dock"] button:active,
+html [data-testid="settings-dialog"] button:active,
+html [role="menu"] button:active {
+	transform: scale(0.97);
+}
+html button:focus-visible,
+html [role="menuitem"]:focus-visible,
+html select:focus-visible,
+html input:focus-visible,
+html textarea:focus-visible {
+	outline: 2px solid var(--lg-ring);
+	outline-offset: 2px;
+}
+
+/* Fallbacks: solid surfaces, no blur. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+	:root { --lg-fill: #1c1e26; --lg-fill-strong: #1c1e26; --lg-card: #1c1e26; }
+	html.light { --lg-fill: #ffffff; --lg-fill-strong: #ffffff; --lg-card: #ffffff; }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+	:root { --lg-fill: #1c1e26; --lg-fill-strong: #1c1e26; --lg-card: #1c1e26; --lg-scrim: rgba(0, 0, 0, 0.7); --lg-blur: none; }
+	html.light { --lg-fill: #ffffff; --lg-fill-strong: #ffffff; --lg-card: #ffffff; --lg-scrim: rgba(20, 22, 28, 0.4); }
+	html [data-testid="settings-backdrop"]::before { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+html[data-solid] {
+	--lg-fill: #1c1e26; --lg-fill-strong: #1c1e26; --lg-card: #1c1e26; --lg-blur: none;
+}
+html.light[data-solid] { --lg-fill: #ffffff; --lg-fill-strong: #ffffff; --lg-card: #ffffff; }
+html[data-solid] [data-testid="settings-backdrop"]::before { -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+@media (forced-colors: active) {
+	html [data-surface],
+	html [data-testid="composer"],
+	html [data-testid="question-dock"],
+	html [data-testid="practice-dock"],
+	html [data-testid="settings-dialog"],
+	html [data-testid="plan-popup"],
+	html [role="menu"],
+	html [role="tooltip"],
+	html [data-lh-menu],
+	html [data-testid="problem-card"],
+	html [data-testid="conclude-card"],
+	html [data-testid="answered-card"],
+	html [data-testid="user-message"] {
+		background: Canvas;
+		color: CanvasText;
+		border-color: CanvasText;
+		-webkit-backdrop-filter: none;
+		backdrop-filter: none;
+		box-shadow: none;
+	}
+	body::before { display: none; }
+	html { background: Canvas; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	html [data-surface] button,
+	html [data-testid] button,
+	html [role="menu"] button {
+		transition: none;
+		animation: none;
+	}
+	html button:active { transform: none; }
+}
+
+/* ── Light mode: diagrams and marks drawn for dark ─────────────────────────
+ * The plan map draws strokes, arrowheads and labels in white (made for a
+ * dark canvas); in light mode they become ink. Scoped to SVGs that hold plan
+ * nodes, so no other white-on-dark artwork changes. */
+html.light svg:has([data-testid^="plan-node-"]) .stroke-white { stroke: color-mix(in oklab, var(--foreground) 72%, transparent); }
+html.light svg:has([data-testid^="plan-node-"]) .fill-white { fill: var(--foreground); }
+html.light svg:has([data-testid^="plan-node-"]) .stroke-border { stroke: color-mix(in oklab, var(--foreground) 30%, transparent); }
+/* The logo's white parts become ink on light glass. */
+html.light [data-surface="sidebar"] svg [style*="#fff"],
+html.light [data-surface="sidebar"] svg [style*="255, 255, 255"] { fill: var(--foreground) !important; }
