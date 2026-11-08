@@ -76,7 +76,7 @@ export function derivedPalette(background: string): Record<string, string> {
  *  exported for tests. */
 export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<string, string> {
 	const vars: Record<string, string> = {};
-	if (a.background !== null) Object.assign(vars, derivedPalette(a.background));
+	if (a.mode !== "light" && a.background !== null) Object.assign(vars, derivedPalette(a.background));
 	if (a.fontFamily !== null) {
 		vars["--font-prose"] = `"${a.fontFamily}", var(--font-sans3), ui-sans-serif, system-ui, sans-serif`;
 	}
@@ -150,6 +150,20 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 			appliedNamesRef.current.add(name);
 		}
 	}, [key, vars]);
+
+	// Mode: swap <html> between dark/light + color-scheme. The server default
+	// stays `dark`, so light flips on the client after the settings fetch.
+	const mode = resolveAppearance(delta).mode === "light" ? "light" : "dark";
+	useEffect(() => {
+		// Until settings load, leave whatever the pre-paint script chose.
+		if (delta === undefined) return;
+		const root = document.documentElement;
+		root.classList.toggle("dark", mode === "dark");
+		root.classList.toggle("light", mode === "light");
+		root.style.colorScheme = mode;
+		// Remembered for the pre-paint script in app/layout.tsx (no dark flash on light).
+		try { localStorage.setItem("lh-mode", mode); } catch { /* storage unavailable: the swap still happens here */ }
+	}, [mode, delta]);
 
 	// One fetch per app load: the record (sanitized server-side) carries the
 	// delta; resolution happens here against the compiled factory.
